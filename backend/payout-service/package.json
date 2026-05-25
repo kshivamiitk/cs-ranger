@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "scheduler:run-due": "tsx src/scheduler-worker.ts"
+    "scheduler:run-due": "tsx src/scheduler-worker.ts",
+    "start": "tsx src/index.ts"
   },
   "dependencies": {
     "express": "^5.0.1",

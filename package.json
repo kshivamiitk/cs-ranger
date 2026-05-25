@@ -2,12 +2,19 @@
   "name": "cs-ranger",
   "version": "0.1.0",
   "private": true,
-  "description": "Root convenience scripts — the real packages live in frontend/ and backend/ (npm workspaces).",
+  "description": "CS-Ranger monolith: Next.js frontend + Node backend services, one install, one build, one start.",
   "scripts": {
+    "install:all": "npm install && npm install --prefix frontend && npm install --prefix backend",
+    "postinstall": "npm install --prefix frontend --no-audit --no-fund && npm install --prefix backend --no-audit --no-fund",
+    "dev": "concurrently -k -n backend,frontend -c cyan,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "build": "npm --prefix frontend run build",
+    "start": "concurrently -k -n backend,frontend -c cyan,magenta \"npm --prefix backend run start\" \"npm --prefix frontend run start\"",
     "typecheck": "npm --prefix frontend run typecheck && npm --prefix backend run typecheck",
     "lint": "npm --prefix frontend run lint",
     "test": "npm --prefix backend run test && npm --prefix frontend run test",
-    "build": "npm --prefix frontend run build",
     "ci": "npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }

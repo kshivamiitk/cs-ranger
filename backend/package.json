@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n gw,auth,user,course,enr,search,pay,wallet,payout,notif,sup,ach,analytics -c blue,green,magenta,cyan,yellow,red,white,gray,blue,green,magenta,cyan,yellow \"npm:dev -w api-gateway\" \"npm:dev -w auth-service\" \"npm:dev -w user-service\" \"npm:dev -w course-service\" \"npm:dev -w enrollment-service\" \"npm:dev -w search-service\" \"npm:dev -w payment-service\" \"npm:dev -w wallet-service\" \"npm:dev -w payout-service\" \"npm:dev -w notification-service\" \"npm:dev -w support-service\" \"npm:dev -w achievement-service\" \"npm:dev -w analytics-service\"",
+    "start": "concurrently -k -n gw,auth,user,course,enr,search,pay,wallet,payout,notif,sup,ach,analytics -c blue,green,magenta,cyan,yellow,red,white,gray,blue,green,magenta,cyan,yellow \"npm:start -w api-gateway\" \"npm:start -w auth-service\" \"npm:start -w user-service\" \"npm:start -w course-service\" \"npm:start -w enrollment-service\" \"npm:start -w search-service\" \"npm:start -w payment-service\" \"npm:start -w wallet-service\" \"npm:start -w payout-service\" \"npm:start -w notification-service\" \"npm:start -w support-service\" \"npm:start -w achievement-service\" \"npm:start -w analytics-service\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "payout:run-due": "npm run scheduler:run-due -w payout-service",
