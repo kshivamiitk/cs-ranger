@@ -6,6 +6,7 @@ import { makeLogger } from "@cs-ranger/shared";
 
 const log = makeLogger("api-gateway");
 const app = express();
+app.set("trust proxy", 1);
 const PORT = Number(process.env.PORT_GATEWAY || 4000);
 const FRONTEND = process.env.FRONTEND_URL || "http://localhost:3000";
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-replace-me";
@@ -22,7 +23,8 @@ app.use(cors({ origin: FRONTEND, credentials: true, exposedHeaders: ["x-request-
 const buckets = new Map<string, { count: number; resetAt: number }>();
 const loginBuckets = new Map<string, { count: number; resetAt: number }>();
 app.use((req, res, next) => {
-  const key = req.ip || "unknown";
+  if (req.method === "OPTIONS") return next();
+  const key = req.ip || req.socket.remoteAddress || "unknown";
   const now = Date.now();
   const isLogin = req.path.startsWith("/api/auth/login");
   const bucket = isLogin ? loginBuckets : buckets;
