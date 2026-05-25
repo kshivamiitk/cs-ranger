@@ -1,0 +1,275 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Light theme tokens */
+  --color-bg: #fafaf9;
+  --color-surface: #ffffff;
+  --color-surface-2: #f5f5f4;
+  --color-border: rgba(15, 23, 42, 0.08);
+  --color-muted: rgba(15, 23, 42, 0.55);
+  --color-fg: #0f172a;
+  --color-fg-dim: rgba(15, 23, 42, 0.65);
+
+  --brand-primary: #7c3aed; /* violet-600 */
+  --brand-accent: #06b6d4; /* cyan-500 */
+  --brand-glow: rgba(124, 58, 237, 0.35);
+
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-display: "Sora", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+html.dark {
+  --color-bg: #07070b;
+  --color-surface: rgba(20, 21, 28, 0.72);
+  --color-surface-2: rgba(28, 30, 38, 0.6);
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-muted: rgba(226, 232, 240, 0.6);
+  --color-fg: #f8fafc;
+  --color-fg-dim: rgba(226, 232, 240, 0.72);
+
+  --brand-primary: #a78bfa; /* violet-400 */
+  --brand-accent: #22d3ee; /* cyan-400 */
+  --brand-glow: rgba(167, 139, 250, 0.45);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+body {
+  min-height: 100vh;
+  background-image:
+    radial-gradient(800px 400px at 10% -10%, rgba(124, 58, 237, 0.12), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, rgba(6, 182, 212, 0.10), transparent 60%);
+  background-attachment: fixed;
+}
+
+html.dark body {
+  background-image:
+    radial-gradient(900px 500px at 10% -10%, rgba(167, 139, 250, 0.18), transparent 60%),
+    radial-gradient(1000px 600px at 110% 0%, rgba(34, 211, 238, 0.14), transparent 60%),
+    radial-gradient(800px 400px at 50% 110%, rgba(167, 139, 250, 0.10), transparent 60%);
+}
+
+/* Custom scrollbar (dark glassmorphic) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.45);
+  background-clip: padding-box;
+}
+
+/* Selection */
+::selection {
+  background: var(--brand-glow);
+  color: var(--color-fg);
+}
+
+/* Component utilities */
+@layer components {
+  .glass {
+    background: var(--color-surface);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--color-border);
+  }
+
+  .glass-strong {
+    background: var(--color-surface);
+    backdrop-filter: blur(28px) saturate(200%);
+    -webkit-backdrop-filter: blur(28px) saturate(200%);
+    border: 1px solid var(--color-border);
+    box-shadow: var(--tw-shadow, 0 0 0 1px rgba(255, 255, 255, 0.04)),
+      0 12px 40px -8px rgba(0, 0, 0, 0.35);
+  }
+
+  .gradient-text {
+    background: linear-gradient(
+      135deg,
+      var(--brand-primary) 0%,
+      var(--brand-accent) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .gradient-border {
+    position: relative;
+    background-clip: padding-box;
+  }
+  .gradient-border::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      135deg,
+      var(--brand-primary),
+      var(--brand-accent)
+    );
+    -webkit-mask: linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 font-medium text-white transition-all;
+    background: linear-gradient(
+      135deg,
+      var(--brand-primary) 0%,
+      var(--brand-accent) 100%
+    );
+    box-shadow: 0 8px 32px -8px var(--brand-glow);
+  }
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 40px -8px var(--brand-glow);
+  }
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 font-medium transition-all;
+    background: var(--color-surface-2);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border);
+  }
+  .btn-ghost:hover {
+    background: var(--color-surface);
+    border-color: var(--brand-primary);
+  }
+
+  .input {
+    @apply w-full rounded-xl px-4 py-2.5 text-sm outline-none transition;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    color: var(--color-fg);
+  }
+  .input:focus {
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 3px var(--brand-glow);
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium;
+    background: var(--color-surface-2);
+    color: var(--color-fg-dim);
+  }
+
+  .ring-brand {
+    box-shadow: 0 0 0 2px var(--brand-primary), 0 0 24px var(--brand-glow);
+  }
+
+  .card {
+    @apply rounded-2xl glass p-5;
+  }
+
+  .heading-1 {
+    @apply font-display text-4xl md:text-6xl font-bold tracking-tight;
+  }
+  .heading-2 {
+    @apply font-display text-3xl md:text-4xl font-bold tracking-tight;
+  }
+  .heading-3 {
+    @apply font-display text-xl md:text-2xl font-semibold tracking-tight;
+  }
+}
+
+/* No-JS warning hidden when JS works */
+.no-js-only {
+  display: none;
+}
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Markdown body — minimal but readable defaults for lesson content rendered
+   by <MarkdownView>. Tailwind's typography plugin isn't installed, so this
+   covers the elements marked emits without pulling in a heavier dep. */
+.markdown-view { line-height: 1.65; color: var(--color-fg); word-wrap: break-word; }
+.markdown-view > *:first-child { margin-top: 0; }
+.markdown-view > *:last-child { margin-bottom: 0; }
+.markdown-view h1 { font-size: 1.6rem; font-weight: 700; margin: 1.5rem 0 0.75rem; letter-spacing: -0.01em; }
+.markdown-view h2 { font-size: 1.3rem; font-weight: 700; margin: 1.25rem 0 0.6rem; letter-spacing: -0.01em; }
+.markdown-view h3 { font-size: 1.1rem; font-weight: 600; margin: 1rem 0 0.5rem; }
+.markdown-view h4 { font-size: 1rem; font-weight: 600; margin: 0.8rem 0 0.4rem; }
+.markdown-view p { margin: 0.6rem 0; }
+.markdown-view ul, .markdown-view ol { margin: 0.6rem 0; padding-left: 1.4rem; }
+.markdown-view li { margin: 0.2rem 0; }
+.markdown-view ul li { list-style: disc; }
+.markdown-view ol li { list-style: decimal; }
+.markdown-view a { color: var(--brand-primary); text-decoration: underline; text-underline-offset: 2px; }
+.markdown-view a:hover { color: var(--brand-accent); }
+.markdown-view strong { font-weight: 700; }
+.markdown-view em { font-style: italic; }
+.markdown-view blockquote {
+  border-left: 3px solid var(--brand-primary);
+  padding: 0.2rem 0 0.2rem 0.9rem;
+  margin: 0.8rem 0;
+  color: var(--color-fg-dim);
+}
+.markdown-view code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.12rem 0.36rem;
+  border-radius: 0.35rem;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+}
+.markdown-view pre {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  margin: 0.8rem 0;
+  font-size: 0.9rem;
+}
+.markdown-view pre code { background: transparent; border: 0; padding: 0; }
+.markdown-view hr { border: 0; border-top: 1px solid var(--color-border); margin: 1.25rem 0; }
+.markdown-view table { width: 100%; border-collapse: collapse; margin: 0.8rem 0; }
+.markdown-view th, .markdown-view td { padding: 0.45rem 0.6rem; border: 1px solid var(--color-border); text-align: left; }
+.markdown-view th { background: var(--color-surface-2); font-weight: 600; }
+.markdown-view img { max-width: 100%; border-radius: 0.5rem; }
+.markdown-view .katex-display { margin: 0.9rem 0; overflow-x: auto; overflow-y: hidden; }

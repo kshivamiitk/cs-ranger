@@ -1,0 +1,38 @@
+{
+  "name": "cs-ranger-backend",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "api-gateway",
+    "auth-service",
+    "user-service",
+    "course-service",
+    "enrollment-service",
+    "search-service",
+    "payment-service",
+    "wallet-service",
+    "payout-service",
+    "notification-service",
+    "support-service",
+    "achievement-service",
+    "analytics-service"
+  ],
+  "scripts": {
+    "dev": "concurrently -n gw,auth,user,course,enr,search,pay,wallet,payout,notif,sup,ach,analytics -c blue,green,magenta,cyan,yellow,red,white,gray,blue,green,magenta,cyan,yellow \"npm:dev -w api-gateway\" \"npm:dev -w auth-service\" \"npm:dev -w user-service\" \"npm:dev -w course-service\" \"npm:dev -w enrollment-service\" \"npm:dev -w search-service\" \"npm:dev -w payment-service\" \"npm:dev -w wallet-service\" \"npm:dev -w payout-service\" \"npm:dev -w notification-service\" \"npm:dev -w support-service\" \"npm:dev -w achievement-service\" \"npm:dev -w analytics-service\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "payout:run-due": "npm run scheduler:run-due -w payout-service",
+    "typecheck": "for d in shared api-gateway auth-service user-service course-service enrollment-service search-service payment-service wallet-service payout-service notification-service support-service achievement-service analytics-service; do echo \"— $d\"; tsc --noEmit -p $d/tsconfig.json || exit 1; done"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^22.10.5",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.7"
+  }
+}

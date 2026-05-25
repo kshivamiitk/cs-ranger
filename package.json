@@ -1,0 +1,13 @@
+{
+  "name": "cs-ranger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Root convenience scripts — the real packages live in frontend/ and backend/ (npm workspaces).",
+  "scripts": {
+    "typecheck": "npm --prefix frontend run typecheck && npm --prefix backend run typecheck",
+    "lint": "npm --prefix frontend run lint",
+    "test": "npm --prefix backend run test && npm --prefix frontend run test",
+    "build": "npm --prefix frontend run build",
+    "ci": "npm run typecheck && npm run lint && npm run test && npm run build"
+  }
+}
