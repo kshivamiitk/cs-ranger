@@ -397,6 +397,12 @@ export const api = {
     // Admin-only: off-cycle payout to a single creator. amountInr in rupees; backend converts to paise.
     manual: (b: { creatorId: string; amountInr: number; reason: string; override?: boolean }) =>
       unwrap<{ runId: string; payoutItemId: string; payoutId?: string; amount: number; status: string }>(axiosClient().post("/payouts/manual", b)),
+    // Admin-only: off-platform manual flow used while bulk Razorpay payouts are down.
+    // Queue returns eligible creators with their full bank/UPI details; mark-paid records
+    // a wallet_ledger payout_debit (no Razorpay call) and stores an audit row.
+    offplatformQueue: () => unwrap<OffPlatformPayoutEntry[]>(axiosClient().get("/payouts/offplatform/queue")),
+    offplatformMarkPaid: (b: { creatorId: string; amountInr: number; method: "bank" | "upi" | "other"; txnReference?: string; note?: string }) =>
+      unwrap<{ recordId: string; ledgerId: string; referenceId: string; amount: number }>(axiosClient().post("/payouts/offplatform/mark-paid", b)),
     failed: async (params?: { page?: number; pageSize?: number }): Promise<Paginated<FailedPayoutItem>> => {
       const { data, meta } = await unwrapWithMeta<FailedPayoutItem[]>(axiosClient().get("/payouts/failed", { params }));
       return { items: data, page: Number(meta.page) || 1, pageSize: Number(meta.pageSize) || 50, total: Number(meta.total) || 0 };
@@ -556,6 +562,21 @@ export interface NodeCreate extends Omit<Partial<CourseNode>, "id" | "position">
 export interface Enrollment { id: string; learner_id: string; course_id: string; enrolled_at: string; completed_at?: string; progress_percent: number; last_node_id?: string; courses?: Course }
 export interface Payment { id: string; learner_id: string; course_id: string; amount: number; status: "pending" | "success" | "failed" | "refunded"; razorpay_payment_id?: string; razorpay_order_id: string; created_at: string }
 export interface LedgerEntry { id: string; creator_id: string; type: string; amount: number; reference_id: string; notes?: string; created_at: string }
+export interface OffPlatformPayoutEntry {
+  creator_id: string;
+  pending: number;            // paise
+  name: string | null;
+  email: string | null;
+  contact_number: string | null;
+  kyc_status: string;
+  method: "bank" | "upi" | null;
+  account_holder_name: string | null;
+  account_number: string | null;
+  account_number_last4: string | null;
+  ifsc: string | null;
+  upi_id: string | null;
+  bank_name: string | null;
+}
 export interface Notification { id: string; user_id: string; type: string; title: string; body: string; href?: string; is_read: boolean; created_at: string }
 export interface Badge { id: string; rule_key: string; name: string; description: string; icon: string; rarity?: string; earned_at?: string }
 export interface Review { id: string; course_id: string; learner_id: string; rating: number; body: string; created_at: string; profiles?: { display_name: string; avatar_url?: string } }

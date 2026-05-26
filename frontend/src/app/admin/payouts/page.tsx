@@ -3,10 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wallet, AlertTriangle, Loader2, Check, RefreshCw, X, CalendarClock } from "lucide-react";
+import { Wallet, AlertTriangle, Loader2, Check, RefreshCw, X, CalendarClock, HandCoins, ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
-import { api } from "@/lib/api";
+import { api, type OffPlatformPayoutEntry } from "@/lib/api";
 import { formatINR } from "@/lib/utils";
 
 const SCHEDULE_LABEL: Record<string, string> = {
@@ -24,6 +24,9 @@ export default function AdminPayoutsPage() {
   const [result, setResult] = useState<{ ok: number; failed: number; total: number; runId?: string } | null>(null);
   const [manualResult, setManualResult] = useState<{ amount: number; creatorId: string } | null>(null);
   const [runDueMessage, setRunDueMessage] = useState<string | null>(null);
+  const [offTarget, setOffTarget] = useState<OffPlatformPayoutEntry | null>(null);
+  const [offExpandedId, setOffExpandedId] = useState<string | null>(null);
+  const [offResult, setOffResult] = useState<{ name: string; amount: number } | null>(null);
 
   const { data: settingsData } = useQuery({ queryKey: ["platform-settings"], queryFn: () => api.admin.platformSettings() });
   const { data: eligible, refetch } = useQuery({ queryKey: ["eligible-payout"], queryFn: () => api.wallet.eligibleForPayout() });
@@ -32,6 +35,10 @@ export default function AdminPayoutsPage() {
   const { data: failedPayouts, isLoading: failedLoading, isError: failedError, refetch: refetchFailed } = useQuery({
     queryKey: ["failed-payouts"],
     queryFn: () => api.payouts.failed(),
+  });
+  const { data: offQueue, refetch: refetchOff } = useQuery({
+    queryKey: ["offplatform-queue"],
+    queryFn: () => api.payouts.offplatformQueue(),
   });
 
   const settings = settingsData?.settings;
@@ -108,6 +115,15 @@ export default function AdminPayoutsPage() {
             </div>
           </div>
         )}
+        {offResult && (
+          <div className="mb-6 flex items-start gap-2 rounded-2xl border border-success/30 bg-success/10 p-4 text-sm">
+            <Check className="mt-0.5 h-5 w-5 text-success" />
+            <div>
+              <p className="font-medium">Off-platform payout recorded</p>
+              <p className="text-xs text-fg-dim">{formatINR(offResult.amount / 100)} marked paid to {offResult.name} · ledger updated · logged in the audit log</p>
+            </div>
+          </div>
+        )}
 
         <section className="mb-8 grid gap-6 lg:grid-cols-3">
           <div className="card">
@@ -152,6 +168,39 @@ export default function AdminPayoutsPage() {
             <button onClick={() => setConfirm(true)} disabled={!(eligible || []).length} className="btn-primary mt-4 disabled:opacity-50">
               Initiate bulk payout ({formatINR(totalEligible / 100)})
             </button>
+          </div>
+        </section>
+
+        <section className="mb-8">
+          <div className="card">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="flex items-center gap-2 font-display text-sm font-semibold"><HandCoins className="h-4 w-4" /> Off-platform payouts</h3>
+                <p className="mt-1 text-xs text-fg-dim">
+                  Pay creators serially from your own bank / UPI app, then mark each one paid here. The ledger updates the same way Razorpay payouts would. Use this while bulk Razorpay payouts are unavailable.
+                </p>
+              </div>
+              <span className="chip border-warning/30 text-warning whitespace-nowrap">{(offQueue || []).length} pending</span>
+            </div>
+
+            {(offQueue || []).length === 0 ? (
+              <p className="mt-4 rounded-xl border border-border bg-surface-2 p-4 text-center text-sm text-fg-dim">No creators currently above the minimum payout threshold.</p>
+            ) : (
+              <div className="mt-4 divide-y divide-border rounded-xl border border-border">
+                {(offQueue || []).map((entry) => (
+                  <OffPlatformRow
+                    key={entry.creator_id}
+                    entry={entry}
+                    expanded={offExpandedId === entry.creator_id}
+                    onToggleExpand={() => setOffExpandedId(offExpandedId === entry.creator_id ? null : entry.creator_id)}
+                    onMarkPaid={() => { setOffTarget(entry); setOffResult(null); }}
+                  />
+                ))}
+              </div>
+            )}
+            <p className="mt-3 text-xs text-fg-dim">
+              Bank account number / phone are only shown for creators who completed KYC after this feature shipped. For legacy bank-KYC creators, contact them via email below to confirm full details.
+            </p>
           </div>
         </section>
 
@@ -327,6 +376,21 @@ export default function AdminPayoutsPage() {
             }}
           />
         )}
+
+        {offTarget && (
+          <OffPlatformMarkPaidModal
+            target={offTarget}
+            onClose={() => setOffTarget(null)}
+            onSuccess={(amountPaise) => {
+              setOffResult({ name: offTarget.name || offTarget.email || offTarget.creator_id.slice(0, 8), amount: amountPaise });
+              setOffTarget(null);
+              setOffExpandedId(null);
+              refetchOff();
+              refetch();
+              qc.invalidateQueries({ queryKey: ["payout-runs"] });
+            }}
+          />
+        )}
       </main>
       <Footer />
     </>
@@ -382,6 +446,157 @@ function ManualPayoutModal({ target, onClose, onSuccess }: { target: EligibleRow
           <button onClick={onClose} className="btn-ghost flex-1" disabled={pay.isPending}>Cancel</button>
           <button onClick={() => pay.mutate()} disabled={invalid || pay.isPending} className="btn-primary flex-1 disabled:opacity-50">
             {pay.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : `Pay ${Number.isFinite(amountInr) && amountInr > 0 ? formatINR(amountInr) : ""}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CopyableField({ label, value }: { label: string; value: string | null }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) {
+    return (
+      <div>
+        <p className="text-xs text-fg-dim">{label}</p>
+        <p className="text-sm text-fg-dim italic">Not on file</p>
+      </div>
+    );
+  }
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch { /* clipboard unavailable */ }
+  };
+  return (
+    <div>
+      <p className="text-xs text-fg-dim">{label}</p>
+      <div className="mt-0.5 flex items-center gap-2">
+        <p className="break-all font-mono text-sm">{value}</p>
+        <button onClick={copy} aria-label={`Copy ${label}`} className="rounded p-1 text-fg-dim hover:bg-surface-2 hover:text-fg">
+          {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OffPlatformRow({ entry, expanded, onToggleExpand, onMarkPaid }: { entry: OffPlatformPayoutEntry; expanded: boolean; onToggleExpand: () => void; onMarkPaid: () => void }) {
+  const methodLabel = entry.method === "upi" ? "UPI" : entry.method === "bank" ? "Bank" : "No method";
+  const bankUsable = entry.method === "bank" && !!entry.account_number;
+  const bankMissing = entry.method === "bank" && !entry.account_number;
+  return (
+    <div>
+      <div className="flex items-center gap-3 p-3 text-sm">
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium">{entry.name || entry.email || `${entry.creator_id.slice(0, 8)}…`}</p>
+          <p className="truncate text-xs text-fg-dim">{entry.email || "—"}</p>
+        </div>
+        <p className="tabular-nums font-medium">{formatINR(entry.pending / 100)}</p>
+        <span className={`chip ${entry.method === "upi" ? "border-brand/30 text-brand" : entry.method === "bank" ? "border-border text-fg-dim" : "border-warning/30 text-warning"}`}>{methodLabel}</span>
+        <span className={`chip ${entry.kyc_status === "approved" ? "border-success/30 text-success" : entry.kyc_status === "failed" ? "border-danger/30 text-danger" : "border-warning/30 text-warning"}`}>KYC {entry.kyc_status}</span>
+        <button onClick={onToggleExpand} aria-label={expanded ? "Hide details" : "Show details"} className="rounded-full p-1 text-fg-dim hover:bg-surface-2 hover:text-fg">
+          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
+        <button onClick={onMarkPaid} disabled={!entry.method} className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50">Mark as paid</button>
+      </div>
+      {expanded && (
+        <div className="grid gap-3 border-t border-border bg-surface-2 p-4 text-sm sm:grid-cols-2">
+          <CopyableField label="Name (account holder)" value={entry.account_holder_name || entry.name} />
+          <CopyableField label="Email" value={entry.email} />
+          <CopyableField label="Contact number" value={entry.contact_number} />
+          {entry.method === "upi" ? (
+            <CopyableField label="UPI ID" value={entry.upi_id} />
+          ) : (
+            <>
+              <CopyableField label="Account number" value={entry.account_number} />
+              <CopyableField label="IFSC" value={entry.ifsc} />
+              {entry.account_number_last4 && !entry.account_number && (
+                <p className="text-xs text-fg-dim sm:col-span-2">Only the last 4 digits ({entry.account_number_last4}) are on file — this creator KYC&apos;d before full account numbers were stored. Reach out via email above to confirm the full number.</p>
+              )}
+            </>
+          )}
+          {bankUsable && (
+            <p className="text-xs text-fg-dim sm:col-span-2">Use IMPS / NEFT to <span className="font-mono">{entry.account_number}</span> · IFSC <span className="font-mono">{entry.ifsc}</span>, then click <b>Mark as paid</b> to debit the wallet ledger.</p>
+          )}
+          {bankMissing && (
+            <p className="text-xs text-warning sm:col-span-2"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" /> Full account number missing — cannot send money until you collect it. The mark-paid action below will still debit the ledger if you pay them through another channel.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OffPlatformMarkPaidModal({ target, onClose, onSuccess }: { target: OffPlatformPayoutEntry; onClose: () => void; onSuccess: (amountPaise: number) => void }) {
+  const [amount, setAmount] = useState(String(Math.floor(target.pending / 100)));
+  const [method, setMethod] = useState<"bank" | "upi" | "other">(target.method ?? "other");
+  const [txnReference, setTxnReference] = useState("");
+  const [note, setNote] = useState("");
+
+  const pay = useMutation({
+    mutationFn: () => api.payouts.offplatformMarkPaid({
+      creatorId: target.creator_id,
+      amountInr: Number(amount),
+      method,
+      txnReference: txnReference.trim() || undefined,
+      note: note.trim() || undefined,
+    }),
+    onSuccess: (r) => onSuccess(r.amount),
+  });
+
+  const amountInr = Number(amount);
+  const amountPaise = Math.round(amountInr * 100);
+  const exceedsPending = Number.isFinite(amountInr) && amountPaise > target.pending;
+  const invalid = !Number.isFinite(amountInr) || amountInr <= 0 || exceedsPending;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="relative w-full max-w-lg rounded-2xl glass-strong p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <h3 className="heading-3 flex items-center gap-2"><HandCoins className="h-5 w-5" /> Mark as paid</h3>
+          <button onClick={onClose} aria-label="Close" className="rounded-full p-1 text-fg-dim hover:bg-surface-2 hover:text-fg"><X className="h-4 w-4" /></button>
+        </div>
+        <p className="mt-2 text-sm text-fg-dim">
+          Confirm you've sent money to <b className="text-fg">{target.name || target.email || target.creator_id.slice(0, 8)}</b> via your own bank or UPI app.
+          This will insert a payout_debit row in the wallet ledger — pending balance drops by this amount. No Razorpay API call is made.
+        </p>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-fg-dim">Amount (INR)</span>
+            <input type="number" min={1} value={amount} onChange={(e) => setAmount(e.target.value)} className="input tabular-nums" />
+            <span className="mt-1 block text-xs text-fg-dim">Pending: {formatINR(target.pending / 100)}</span>
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-fg-dim">Method</span>
+            <select value={method} onChange={(e) => setMethod(e.target.value as "bank" | "upi" | "other")} className="input">
+              <option value="bank">Bank transfer (IMPS/NEFT)</option>
+              <option value="upi">UPI</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+        </div>
+
+        <label className="mt-3 block">
+          <span className="mb-1.5 block text-xs font-medium text-fg-dim">Transaction reference (optional — UTR / UPI ref)</span>
+          <input type="text" value={txnReference} onChange={(e) => setTxnReference(e.target.value)} className="input font-mono" placeholder="e.g. 412345678901" />
+        </label>
+        <label className="mt-3 block">
+          <span className="mb-1.5 block text-xs font-medium text-fg-dim">Note (optional)</span>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className="input min-h-[60px]" placeholder="Anything worth remembering for audit." />
+        </label>
+
+        {exceedsPending && (
+          <p className="mt-3 text-xs text-danger">Amount exceeds pending balance ({formatINR(target.pending / 100)}). Reduce the amount or skip this creator.</p>
+        )}
+        {pay.isError && (
+          <p className="mt-3 text-xs text-danger">{pay.error instanceof Error ? pay.error.message : "Could not record payout"}</p>
+        )}
+
+        <div className="mt-5 flex gap-2">
+          <button onClick={onClose} className="btn-ghost flex-1" disabled={pay.isPending}>Cancel</button>
+          <button onClick={() => pay.mutate()} disabled={invalid || pay.isPending} className="btn-primary flex-1 disabled:opacity-50">
+            {pay.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : `Mark ${Number.isFinite(amountInr) && amountInr > 0 ? formatINR(amountInr) : ""} paid`}
           </button>
         </div>
       </div>

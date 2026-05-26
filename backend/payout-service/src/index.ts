@@ -1,7 +1,7 @@
 import express from "express";
 import { createService, ok, fail, requireAuth, requireRole, withDb, isSupabaseConfigured, razorpay, isRazorpayConfigured, verifyWebhookSignature, publish, Topics, getPlatformSetting, writeAuditLog, buildAnnualStatementPdf, type StatementMonthRow } from "@cs-ranger/shared";
 import { z } from "zod";
-import { ACCOUNT_NUMBER, dispatchRazorpayPayout, settleMockPayout, runBulkPayout, runDueScheduledPayouts, readPayoutSchedule } from "./bulk.js";
+import { ACCOUNT_NUMBER, dispatchRazorpayPayout, settleMockPayout, runBulkPayout, runDueScheduledPayouts, readPayoutSchedule, minPayoutPaise } from "./bulk.js";
 import { currentPayoutWindow, nextPayoutWindowOpensAt } from "./scheduler.js";
 
 const { app, listen, log } = createService("payout-service");
@@ -81,7 +81,9 @@ app.post("/kyc/:creatorId", requireAuth, async (req, res) => {
     fundAccountId = `fa_dev_${Date.now()}`;
   }
 
-  // 3. Persist KYC record
+  // 3. Persist KYC record. Full account_number / account_holder_name /
+  // contact_number are stored so admins can run off-platform payouts while
+  // bulk Razorpay payouts are unavailable (see /offplatform/queue below).
   await withDb(async (db) => {
     await db.from("kyc_details").upsert({
       creator_id: req.params.creatorId,
@@ -89,9 +91,12 @@ app.post("/kyc/:creatorId", requireAuth, async (req, res) => {
       razorpay_fund_account_id: fundAccountId,
       kyc_status: isRazorpayConfigured() ? "pending" : "approved",
       bank_name: d.type === "bank" ? "Bank Account" : null,
+      account_number: d.accountNumber || null,
       account_number_last4: d.accountNumber?.slice(-4) || null,
       ifsc: d.ifsc || null,
       upi_id: d.upiId || null,
+      account_holder_name: d.accountHolderName,
+      contact_number: d.contactNumber,
       verified_at: isRazorpayConfigured() ? null : new Date().toISOString(),
     }, { onConflict: "creator_id" });
     return null;
@@ -256,6 +261,123 @@ app.post("/manual", requireRole("admin"), async (req, res) => {
 
   if (status === "failed") return fail(res, 502, errorMsg || "Payout dispatch failed", "GATEWAY_ERROR", { runId, payoutItemId: itemId });
   ok(res, { runId, payoutItemId: itemId, payoutId, amount: amountPaise, status });
+});
+
+// ─── Off-platform payouts (admin) ─────────────────────────────────
+// Interim flow while bulk Razorpay payouts are unavailable. Admin pays the
+// creator via their own bank / UPI app, then records the disbursement here.
+// The wallet_ledger row triggers the same balance update as a webhook-confirmed
+// Razorpay payout — pending drops, total_paid_out grows.
+
+app.get("/offplatform/queue", requireRole("admin"), async (_req, res) => {
+  const minPayout = await minPayoutPaise();
+  const rows = await withDb(async (db) => {
+    const { data } = await db.from("creator_balances")
+      .select("creator_id, pending, kyc_details(kyc_status, bank_name, account_holder_name, account_number, account_number_last4, ifsc, upi_id, contact_number)")
+      .gte("pending", minPayout)
+      .order("pending", { ascending: false });
+    return (data as unknown as Array<{
+      creator_id: string;
+      pending: number;
+      kyc_details: { kyc_status: string; bank_name: string | null; account_holder_name: string | null; account_number: string | null; account_number_last4: string | null; ifsc: string | null; upi_id: string | null; contact_number: string | null } | null;
+    }>) || [];
+  }, () => []);
+
+  // Fetch users + profile display names in a single batched query.
+  const ids = rows.map((r) => r.creator_id);
+  const users = ids.length === 0 ? [] : await withDb(async (db) => {
+    const { data } = await db.from("users").select("id, email, profiles(display_name, username)").in("id", ids);
+    return (data as unknown as Array<{ id: string; email: string; profiles: { display_name: string | null; username: string | null } | null }>) || [];
+  }, () => []);
+  const userById = new Map(users.map((u) => [u.id, u]));
+
+  const items = rows.map((r) => {
+    const u = userById.get(r.creator_id);
+    const kyc = r.kyc_details;
+    const method: "bank" | "upi" | null = kyc?.upi_id ? "upi" : (kyc?.account_number || kyc?.account_number_last4) ? "bank" : null;
+    return {
+      creator_id: r.creator_id,
+      pending: r.pending,
+      name: u?.profiles?.display_name || u?.profiles?.username || null,
+      email: u?.email || null,
+      contact_number: kyc?.contact_number || null,
+      kyc_status: kyc?.kyc_status || "missing",
+      method,
+      account_holder_name: kyc?.account_holder_name || null,
+      account_number: kyc?.account_number || null,
+      account_number_last4: kyc?.account_number_last4 || null,
+      ifsc: kyc?.ifsc || null,
+      upi_id: kyc?.upi_id || null,
+      bank_name: kyc?.bank_name || null,
+    };
+  });
+  ok(res, items);
+});
+
+const OffplatformMarkPaidSchema = z.object({
+  creatorId: z.string().uuid(),
+  amountInr: z.number().positive(),
+  method: z.enum(["bank", "upi", "other"]),
+  txnReference: z.string().trim().optional(),
+  note: z.string().trim().optional(),
+});
+
+app.post("/offplatform/mark-paid", requireRole("admin"), async (req, res) => {
+  const parsed = OffplatformMarkPaidSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message, "VALIDATION");
+  const { creatorId, amountInr, method, txnReference, note } = parsed.data;
+  const amountPaise = Math.round(amountInr * 100);
+
+  const balance = await withDb(async (db) => {
+    const { data } = await db.from("creator_balances").select("pending").eq("creator_id", creatorId).maybeSingle();
+    return data;
+  }, null);
+  if (!balance) return fail(res, 404, "Creator not found", "NOT_FOUND");
+  if (balance.pending < amountPaise) {
+    return fail(res, 400, `Amount exceeds pending balance (₹${(balance.pending / 100).toFixed(2)}).`, "INSUFFICIENT_BALANCE", { pending: balance.pending });
+  }
+
+  // The wallet_ledger row is the source of truth; manual_payouts is descriptive.
+  // Insert the ledger row first so the balance trigger fires, then write the
+  // audit row pointing back at it.
+  const referenceId = `manual-offplatform-${Date.now()}-${creatorId.slice(0, 8)}`;
+  const ledgerId = await withDb(async (db) => {
+    const { data, error } = await db.from("wallet_ledger").insert({
+      creator_id: creatorId,
+      type: "payout_debit",
+      amount: -amountPaise,
+      reference_id: referenceId,
+      notes: note ? `off-platform: ${note}` : "off-platform manual payout",
+    }).select("id").single();
+    if (error) throw error;
+    return data!.id as string;
+  }, () => `ledger_dev_${Date.now()}`);
+
+  const recordId = await withDb(async (db) => {
+    const { data, error } = await db.from("manual_payouts").insert({
+      creator_id: creatorId,
+      amount: amountPaise,
+      method,
+      txn_reference: txnReference || null,
+      note: note || null,
+      marked_paid_by: req.user!.id,
+      ledger_id: ledgerId,
+    }).select("id").single();
+    if (error) throw error;
+    return data!.id as string;
+  }, () => `manual_dev_${Date.now()}`);
+
+  await writeAuditLog({
+    adminId: req.user!.id,
+    action: "payout.offplatform_mark_paid",
+    targetType: "manual_payout",
+    targetId: String(recordId),
+    metadata: { creatorId, amount: amountPaise, method, txnReference, note, ledgerId, referenceId },
+  });
+
+  await publish(Topics.PAYOUT_COMPLETED, { creatorId, payoutId: referenceId, amount: amountPaise });
+
+  ok(res, { recordId, ledgerId, referenceId, amount: amountPaise });
 });
 
 // ─── Failed payouts (admin) ──────────────────────────────────────
