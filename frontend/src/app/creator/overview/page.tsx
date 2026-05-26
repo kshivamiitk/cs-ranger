@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Wallet, Users, BookOpen, Star, ArrowRight, FileCheck2 } from "lucide-react";
+import { Wallet, Users, BookOpen, Star, ArrowRight, FileCheck2, Sparkles } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { CreatorTermsModal } from "@/components/creator/CreatorTermsModal";
+import { CreatorTour, hasSeenCreatorTour } from "@/components/creator/CreatorTour";
 import { api } from "@/lib/api";
 import { useApp } from "@/app/providers";
 import { formatCompact, formatINR } from "@/lib/utils";
@@ -15,6 +16,18 @@ export default function CreatorOverviewPage() {
   const { user } = useApp();
   const creatorId = user?.user_id || user?.id;
   const [showTerms, setShowTerms] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+
+  // Auto-show the tour the first time a creator lands on this page.
+  // Gated by localStorage so returning creators don't get interrupted.
+  useEffect(() => {
+    if (!user) return;
+    if (!hasSeenCreatorTour()) {
+      // small delay so the page paints before the modal overlays it
+      const t = setTimeout(() => setTourOpen(true), 400);
+      return () => clearTimeout(t);
+    }
+  }, [user]);
   const { data: stats } = useQuery({ queryKey: ["creator-overview", creatorId], queryFn: () => api.analytics.creatorOverview(creatorId!), enabled: !!creatorId });
   const { data: balance } = useQuery({ queryKey: ["balance", creatorId], queryFn: () => api.wallet.balance(creatorId!), enabled: !!creatorId });
   const { data: termsStatus } = useQuery({ queryKey: ["creator-terms-status"], queryFn: () => api.users.creatorTermsStatus(), enabled: !!creatorId });
@@ -27,9 +40,22 @@ export default function CreatorOverviewPage() {
   return (
     <>
       <Navbar variant="creator" />
+      <CreatorTour open={tourOpen} onClose={() => setTourOpen(false)} />
       <main className="mx-auto max-w-7xl px-4 py-10 md:px-6">
-        <h1 className="heading-2">Creator Overview</h1>
-        <p className="mt-1 text-sm text-fg-dim">Your studio at a glance.</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="heading-2">Creator Overview</h1>
+            <p className="mt-1 text-sm text-fg-dim">Your studio at a glance.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setTourOpen(true)}
+            className="btn-ghost text-sm"
+            aria-label="Replay creator tour"
+          >
+            <Sparkles className="h-4 w-4" /> Take the tour
+          </button>
+        </div>
 
         {termsStatus && !termsStatus.accepted && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-warning/40 bg-warning/10 p-4 text-sm">
