@@ -93,7 +93,21 @@ function finishTour() {
   saveTourState({ active: false, step: 0, done: true });
 }
 
-// Has this creator already seen (or dismissed) the tour?
+// Should the overview page auto-trigger a fresh tour on mount?
+//
+// Returns true ONLY for never-seen-it users. If the tour is currently in
+// progress (state.active === true) we do NOT auto-start — the boot component
+// in the creator layout is already resuming it across navigations. Without
+// this guard, navigating mid-tour back to /creator/overview (e.g. to highlight
+// the Finance nav link) would re-trigger startCreatorTour() and reset to step 1.
+export function shouldAutoStartCreatorTour(): boolean {
+  if (typeof window === "undefined") return false;
+  const s = getTourState();
+  return s === null; // null = never started before
+}
+
+// Kept for backward-compat callers; same semantics as before (true once tour
+// has been finished or dismissed). Internal code uses shouldAutoStartCreatorTour.
 export function hasSeenCreatorTour(): boolean {
   if (typeof window === "undefined") return true;
   const s = getTourState();
@@ -168,6 +182,10 @@ export function CreatorTourBoot() {
       overlayOpacity: 0.6,
       stagePadding: 6,
       stageRadius: 8,
+      // Custom class hooks into globals.css so the popover matches the site's
+      // dark surface, border, and brand-gradient buttons instead of driver.js
+      // default light theme.
+      popoverClass: "cs-tour-popover",
       showButtons: ["next", "previous", "close"],
       nextBtnText: isLast ? "Finish" : "Next →",
       prevBtnText: "← Back",

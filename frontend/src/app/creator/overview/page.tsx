@@ -7,7 +7,7 @@ import { Wallet, Users, BookOpen, Star, ArrowRight, FileCheck2, Sparkles } from 
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { CreatorTermsModal } from "@/components/creator/CreatorTermsModal";
-import { hasSeenCreatorTour, startCreatorTour } from "@/components/creator/CreatorTour";
+import { shouldAutoStartCreatorTour, startCreatorTour } from "@/components/creator/CreatorTour";
 import { api } from "@/lib/api";
 import { useApp } from "@/app/providers";
 import { formatCompact, formatINR } from "@/lib/utils";
@@ -17,11 +17,15 @@ export default function CreatorOverviewPage() {
   const creatorId = user?.user_id || user?.id;
   const [showTerms, setShowTerms] = useState(false);
 
-  // Auto-start the spotlight tour the first time a creator lands here.
-  // The boot component in /creator/layout.tsx then drives it across pages.
+  // Auto-start the spotlight tour the FIRST time a creator ever sees this page.
+  // shouldAutoStartCreatorTour() returns true only for never-seen-it users;
+  // if a tour is already in progress (mid-flight, navigating between pages),
+  // we don't re-trigger it — the boot component in /creator/layout.tsx handles
+  // resume. Without this, returning to /creator/overview mid-tour would reset
+  // the step counter back to 0.
   useEffect(() => {
     if (!user) return;
-    if (!hasSeenCreatorTour()) {
+    if (shouldAutoStartCreatorTour()) {
       const t = setTimeout(() => startCreatorTour(), 600);
       return () => clearTimeout(t);
     }
