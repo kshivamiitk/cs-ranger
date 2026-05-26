@@ -2,7 +2,7 @@
 
 import axios, { AxiosError, type AxiosInstance } from "axios";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 const IS_DEV = process.env.NODE_ENV !== "production";
 

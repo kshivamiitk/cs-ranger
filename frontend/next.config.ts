@@ -17,6 +17,12 @@ const nextConfig: NextConfig = {
       { source: "/delivery", destination: "/digital-delivery-policy", permanent: true },
     ];
   },
+  async rewrites() {
+    const apiGateway = process.env.API_GATEWAY_URL || "http://localhost:4000";
+    return [
+      { source: "/api/:path*", destination: `${apiGateway}/api/:path*` },
+    ];
+  },
 };
 
 export default nextConfig;
