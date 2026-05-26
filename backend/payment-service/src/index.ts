@@ -1,4 +1,3 @@
-import express from "express";
 import { createService, ok, fail, mock, requireAuth, requireRole, withDb, isSupabaseConfigured, razorpay, isRazorpayConfigured, verifyWebhookSignature, verifyPaymentSignature, publish, Topics, getPlatformSetting, writeAuditLog } from "@cs-ranger/shared";
 import { z } from "zod";
 
@@ -186,11 +185,15 @@ app.post("/verify", requireAuth, async (req, res) => {
 });
 
 // ─── Razorpay webhook (server-to-server confirmation) ────────────
-// Express must receive the raw body to verify HMAC. We register a raw parser
-// only for this route to avoid global JSON parsing eating the body.
-app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+// Razorpay HMAC-signs the raw bytes of the request body. The global
+// express.json() middleware in createService captures those bytes via its
+// `verify` callback and attaches them as req.rawBody — we use that for the
+// signature check, then keep using req.body (already-parsed JSON) for everything
+// else.
+app.post("/webhook", async (req, res) => {
   const signature = req.header("x-razorpay-signature");
-  const rawBody = (req.body as Buffer).toString("utf8");
+  const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody?.toString("utf8");
+  if (!rawBody) return fail(res, 400, "Empty body", "VALIDATION");
 
   if (isRazorpayConfigured() && !verifyWebhookSignature(rawBody, signature)) {
     return fail(res, 401, "Invalid signature", "INVALID_SIGNATURE");

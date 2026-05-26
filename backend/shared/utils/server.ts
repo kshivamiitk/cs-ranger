@@ -8,7 +8,14 @@ export function createService(name: string): { app: Express; log: ReturnType<typ
   const app = express();
   const log = makeLogger(name);
   const metrics = createMetricsStore();
-  app.use(express.json({ limit: "2mb" }));
+  // `verify` runs during JSON parse and gives us the original bytes — needed
+  // for HMAC-signed webhooks (Razorpay) whose signatures are computed over the
+  // raw request body. Otherwise express.json consumes the buffer and the
+  // webhook handler only sees the parsed object, breaking signature checks.
+  app.use(express.json({
+    limit: "2mb",
+    verify: (req, _res, buf) => { (req as unknown as { rawBody: Buffer }).rawBody = buf; },
+  }));
   app.use(attachUser);
   // Per-service request timing. Logs the in-service handler duration so a slow
   // endpoint can be isolated from gateway/proxy overhead. No bodies/PII are logged
