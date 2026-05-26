@@ -1,0 +1,43 @@
+name: Deploy
+
+# Triggers:
+#   - push to main: automatic deploy
+#   - workflow_dispatch: manual deploy from the Actions tab (useful for re-runs)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys at once. If a new push lands mid-deploy, queue it.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Set up SSH key + known_hosts
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Run deploy.sh on EC2
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          # Ensure the server has the latest deploy.sh before invoking it.
+          # (Bootstraps the very first deploy; also self-heals if the script ever drifts.)
+          ssh -i ~/.ssh/id_ed25519 \
+              -o ConnectTimeout=20 \
+              -o ServerAliveInterval=30 \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -e; cd /home/ubuntu/cs-ranger && git fetch --quiet origin main && git reset --hard origin/main && chmod +x deploy.sh && bash deploy.sh"
