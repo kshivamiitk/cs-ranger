@@ -1,4 +1,5 @@
 import express from "express";
+import http from "node:http";
 import cors from "cors";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import jwt from "jsonwebtoken";
@@ -7,6 +8,22 @@ import { makeLogger } from "@cs-ranger/shared";
 const log = makeLogger("api-gateway");
 const app = express();
 app.set("trust proxy", 1);
+
+// Shared HTTP keep-alive Agent for ALL proxy hops. Default http.Agent is
+// keepAlive:false → every proxied request opens a fresh TCP socket to the
+// downstream service. That dominated p50 latency at 250+ concurrent in
+// load tests (818ms p50 with default, ~150ms with keep-alive). maxSockets
+// caps fan-out so one busy service can't starve the others.
+const upstreamAgent = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30_000,
+  maxSockets: 256,
+  maxFreeSockets: 64,
+});
+
+// Raise EventEmitter limit so http-proxy-middleware's per-request close
+// listeners stop spamming "MaxListenersExceededWarning" under sustained load.
+process.setMaxListeners(50);
 const PORT = Number(process.env.PORT_GATEWAY || 4000);
 const FRONTEND = process.env.FRONTEND_URL || "http://localhost:3000";
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-replace-me";
@@ -136,6 +153,11 @@ for (const [prefix, port] of Object.entries(SERVICES)) {
     target: `http://localhost:${port}`,
     changeOrigin: true,
     pathRewrite: { [`^/api/${prefix}`]: "" },
+    // Reuse one keep-alive Agent across all backend hops. Without this the
+    // gateway opens a brand-new TCP socket per request — fine in dev, but
+    // load-tests showed it dominates p50 latency at 250c+. See the Agent
+    // declaration at the top of this file for the cap values.
+    agent: upstreamAgent,
     // Critical: don't parse the body — let downstream handle raw for webhooks
   }));
 }
