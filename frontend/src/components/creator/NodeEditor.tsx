@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, ListChecks, Play, FileType, Code2, Plus, Trash2, Upload, Loader2, AlertCircle, Paperclip } from "lucide-react";
+import { FileText, ListChecks, Play, FileType, Code2, Plus, Trash2, Upload, Loader2, AlertCircle, Paperclip, FileJson, Copy, Check, ChevronDown, ChevronRight } from "lucide-react";
 import { api, type CourseNode, type VideoChapter, type VideoSubtitle } from "@/lib/api";
 import { FileUpload } from "@/components/common/FileUpload";
 import { MarkdownView } from "@/components/common/MarkdownView";
@@ -433,6 +433,197 @@ function PdfEditor({ value, onChange }: { value: Partial<CourseNode>; onChange: 
 }
 
 interface QuizQ { id: string; prompt: string; options: string[]; correctIndex: number; explanation?: string }
+
+interface ImportedPayload { timerSeconds?: number; passingPercent?: number; questions: QuizQ[] }
+
+// Parse JSON that's either a bare question array or a full quiz_payload wrapper.
+// Returns { ok: true, data } on success or { ok: false, error } with a human message.
+function parseQuizJson(raw: string): { ok: true; data: ImportedPayload } | { ok: false; error: string } {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { return { ok: false, error: `Not valid JSON: ${(e as Error).message}` }; }
+
+  // Normalize: bare array OR { questions: [...] }.
+  let questionsRaw: unknown;
+  let timerSeconds: number | undefined;
+  let passingPercent: number | undefined;
+  if (Array.isArray(parsed)) {
+    questionsRaw = parsed;
+  } else if (parsed && typeof parsed === "object" && Array.isArray((parsed as { questions?: unknown }).questions)) {
+    const obj = parsed as { questions: unknown; timerSeconds?: unknown; passingPercent?: unknown };
+    questionsRaw = obj.questions;
+    if (typeof obj.timerSeconds === "number") timerSeconds = obj.timerSeconds;
+    if (typeof obj.passingPercent === "number") passingPercent = obj.passingPercent;
+  } else {
+    return { ok: false, error: "Top level must be an array of questions or { questions: [...] }." };
+  }
+
+  const arr = questionsRaw as unknown[];
+  if (arr.length === 0) return { ok: false, error: "No questions found." };
+
+  const out: QuizQ[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const q = arr[i];
+    if (!q || typeof q !== "object") return { ok: false, error: `Question ${i + 1} is not an object.` };
+    const o = q as Record<string, unknown>;
+    if (typeof o.prompt !== "string" || !o.prompt.trim()) return { ok: false, error: `Question ${i + 1}: missing "prompt".` };
+    if (!Array.isArray(o.options) || o.options.length < 2) return { ok: false, error: `Question ${i + 1}: "options" must be an array of at least 2 strings.` };
+    if (!o.options.every((x) => typeof x === "string")) return { ok: false, error: `Question ${i + 1}: every option must be a string.` };
+    if (typeof o.correctIndex !== "number" || !Number.isInteger(o.correctIndex) || o.correctIndex < 0 || o.correctIndex >= o.options.length) {
+      return { ok: false, error: `Question ${i + 1}: "correctIndex" must be an integer in [0, ${o.options.length - 1}].` };
+    }
+    if (o.explanation !== undefined && typeof o.explanation !== "string") {
+      return { ok: false, error: `Question ${i + 1}: "explanation" must be a string when present.` };
+    }
+    out.push({
+      id: typeof o.id === "string" && o.id ? o.id : `q-${Date.now()}-${i}`,
+      prompt: o.prompt,
+      options: o.options as string[],
+      correctIndex: o.correctIndex,
+      ...(typeof o.explanation === "string" ? { explanation: o.explanation } : {}),
+    });
+  }
+  return { ok: true, data: { timerSeconds, passingPercent, questions: out } };
+}
+
+// Render the questions array as a clean markdown block.
+function quizToMarkdown(qs: QuizQ[]): string {
+  if (!qs.length) return "_(no questions yet)_";
+  return qs.map((q, i) => {
+    const opts = q.options.map((o, oi) => {
+      const letter = String.fromCharCode(65 + oi);
+      const mark = oi === q.correctIndex ? " **(correct)**" : "";
+      return `- ${letter}. ${o}${mark}`;
+    }).join("\n");
+    const expl = q.explanation ? `\n\n> _Explanation:_ ${q.explanation}` : "";
+    return `**Q${i + 1}.** ${q.prompt}\n\n${opts}${expl}`;
+  }).join("\n\n---\n\n");
+}
+
+function QuizBulkPanel({
+  questions,
+  onAppend,
+  onReplace,
+}: {
+  questions: QuizQ[];
+  onAppend: (imported: ImportedPayload) => void;
+  onReplace: (imported: ImportedPayload) => void;
+}) {
+  const [importOpen, setImportOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [raw, setRaw] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [parsed, setParsed] = useState<ImportedPayload | null>(null);
+  const [copied, setCopied] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const markdown = quizToMarkdown(questions);
+
+  function handleParse(text: string) {
+    setRaw(text);
+    if (!text.trim()) { setError(null); setParsed(null); return; }
+    const r = parseQuizJson(text);
+    if (r.ok) { setError(null); setParsed(r.data); }
+    else { setError(r.error); setParsed(null); }
+  }
+  async function handleFile(file: File) {
+    if (!file.name.toLowerCase().endsWith(".json")) {
+      setError("Please pick a .json file.");
+      return;
+    }
+    const text = await file.text();
+    handleParse(text);
+  }
+  async function copyMarkdown() {
+    try { await navigator.clipboard.writeText(markdown); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { /* ignore */ }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => setImportOpen((v) => !v)} className="btn-ghost text-sm">
+          {importOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <FileJson className="h-4 w-4" /> Import from JSON
+        </button>
+        <button type="button" onClick={() => setPreviewOpen((v) => !v)} className="btn-ghost text-sm">
+          {previewOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <FileText className="h-4 w-4" /> Preview as markdown
+        </button>
+      </div>
+
+      {importOpen && (
+        <div className="rounded-xl border border-border bg-surface-2 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-fg-dim">
+              Paste a JSON array of questions, or a <code>{"{ timerSeconds, passingPercent, questions }"}</code> object.
+            </p>
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="btn-ghost text-xs">
+              <Upload className="h-3 w-3" /> Pick .json file
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
+            />
+          </div>
+          <textarea
+            value={raw}
+            onChange={(e) => handleParse(e.target.value)}
+            rows={8}
+            placeholder={`[\n  {\n    "prompt": "What does HTTP stand for?",\n    "options": ["Hyper Text Transfer Protocol", "Home Tool Transfer Protocol", "Hyper Time Tracking Protocol", "Hard To Type Protocol"],\n    "correctIndex": 0,\n    "explanation": "HTTP is the foundation of data exchange on the Web."\n  }\n]`}
+            className="input font-mono text-xs"
+            spellCheck={false}
+          />
+          {error && (
+            <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 p-2 text-xs text-danger">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+          {parsed && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-success/30 bg-success/10 p-2 text-xs">
+              <span className="text-success">
+                ✓ Parsed {parsed.questions.length} question{parsed.questions.length === 1 ? "" : "s"}
+                {parsed.timerSeconds !== undefined ? ` · timer ${parsed.timerSeconds}s` : ""}
+                {parsed.passingPercent !== undefined ? ` · passing ${parsed.passingPercent}%` : ""}
+              </span>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => onAppend(parsed)} className="btn-ghost text-xs">
+                  <Plus className="h-3 w-3" /> Append
+                </button>
+                <button type="button" onClick={() => onReplace(parsed)} className="btn-primary text-xs">
+                  <Upload className="h-3 w-3" /> Replace all
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {previewOpen && (
+        <div className="rounded-xl border border-border bg-surface-2 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-fg-dim">Rendered markdown of the current quiz.</p>
+            <button type="button" onClick={copyMarkdown} className="btn-ghost text-xs">
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+              {copied ? "Copied" : "Copy markdown"}
+            </button>
+          </div>
+          <pre className="overflow-x-auto rounded-lg border border-border bg-surface p-2 text-xs"><code>{markdown}</code></pre>
+          <details className="text-xs">
+            <summary className="cursor-pointer text-fg-dim hover:text-fg">Show rendered preview</summary>
+            <div className="mt-2 rounded-lg border border-border bg-surface p-3">
+              <MarkdownView source={markdown} />
+            </div>
+          </details>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuizEditor({ value, onChange }: { value: Partial<CourseNode>; onChange: (n: Partial<CourseNode>) => void }) {
   const payload = value.quiz_payload || { timerSeconds: 300, passingPercent: 60, questions: [] as QuizQ[] };
   const questions = payload.questions || [];
@@ -451,6 +642,20 @@ function QuizEditor({ value, onChange }: { value: Partial<CourseNode>; onChange:
   function removeQ(i: number) {
     update({ questions: questions.filter((_, idx) => idx !== i) });
   }
+  function appendImported(imp: ImportedPayload) {
+    update({
+      questions: [...questions, ...imp.questions],
+      ...(imp.timerSeconds !== undefined ? { timerSeconds: imp.timerSeconds } : {}),
+      ...(imp.passingPercent !== undefined ? { passingPercent: imp.passingPercent } : {}),
+    });
+  }
+  function replaceImported(imp: ImportedPayload) {
+    update({
+      questions: imp.questions,
+      ...(imp.timerSeconds !== undefined ? { timerSeconds: imp.timerSeconds } : {}),
+      ...(imp.passingPercent !== undefined ? { passingPercent: imp.passingPercent } : {}),
+    });
+  }
 
   return (
     <div className="card space-y-4">
@@ -464,6 +669,7 @@ function QuizEditor({ value, onChange }: { value: Partial<CourseNode>; onChange:
           <input type="number" value={payload.passingPercent || 60} onChange={(e) => update({ passingPercent: Number(e.target.value) })} className="input" />
         </label>
       </div>
+      <QuizBulkPanel questions={questions} onAppend={appendImported} onReplace={replaceImported} />
       {questions.map((q, i) => (
         <div key={q.id} className="rounded-xl border border-border bg-surface-2 p-3">
           <div className="flex items-start gap-2">
