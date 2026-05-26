@@ -15,16 +15,24 @@ npm install --no-audit --no-fund
 echo "▶ build frontend"
 npm --prefix frontend run build
 
+# Backend services run via tsx and do NOT call dotenv.config(); they read env
+# from the process at start time. `pm2 reload` alone reuses the env snapshot
+# from when pm2 first started — .env edits would be silently ignored. Source
+# .env into this shell and pass --update-env so pm2 hands the fresh env to
+# each reloaded worker.
+echo "▶ source .env into deploy shell so pm2 --update-env picks up new values"
+set -a; source .env; set +a
+
 echo "▶ reload backend services in two waves (avoids Redis client-limit collisions)"
-pm2 reload cs-api-gateway cs-auth-service cs-user-service
+pm2 reload cs-api-gateway cs-auth-service cs-user-service --update-env
 sleep 3
 pm2 reload cs-course-service cs-enrollment-service cs-search-service \
            cs-payment-service cs-wallet-service cs-payout-service \
            cs-notification-service cs-support-service \
-           cs-achievement-service cs-analytics-service
+           cs-achievement-service cs-analytics-service --update-env
 
 echo "▶ reload frontend"
-pm2 reload cs-frontend
+pm2 reload cs-frontend --update-env
 
 echo "▶ wait for services to settle"
 sleep 6
