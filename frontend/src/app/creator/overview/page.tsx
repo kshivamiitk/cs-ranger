@@ -7,7 +7,7 @@ import { Wallet, Users, BookOpen, Star, ArrowRight, FileCheck2, Sparkles } from 
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { CreatorTermsModal } from "@/components/creator/CreatorTermsModal";
-import { CreatorTour, hasSeenCreatorTour } from "@/components/creator/CreatorTour";
+import { hasSeenCreatorTour, startCreatorTour } from "@/components/creator/CreatorTour";
 import { api } from "@/lib/api";
 import { useApp } from "@/app/providers";
 import { formatCompact, formatINR } from "@/lib/utils";
@@ -16,15 +16,13 @@ export default function CreatorOverviewPage() {
   const { user } = useApp();
   const creatorId = user?.user_id || user?.id;
   const [showTerms, setShowTerms] = useState(false);
-  const [tourOpen, setTourOpen] = useState(false);
 
-  // Auto-show the tour the first time a creator lands on this page.
-  // Gated by localStorage so returning creators don't get interrupted.
+  // Auto-start the spotlight tour the first time a creator lands here.
+  // The boot component in /creator/layout.tsx then drives it across pages.
   useEffect(() => {
     if (!user) return;
     if (!hasSeenCreatorTour()) {
-      // small delay so the page paints before the modal overlays it
-      const t = setTimeout(() => setTourOpen(true), 400);
+      const t = setTimeout(() => startCreatorTour(), 600);
       return () => clearTimeout(t);
     }
   }, [user]);
@@ -40,7 +38,6 @@ export default function CreatorOverviewPage() {
   return (
     <>
       <Navbar variant="creator" />
-      <CreatorTour open={tourOpen} onClose={() => setTourOpen(false)} />
       <main className="mx-auto max-w-7xl px-4 py-10 md:px-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -49,7 +46,8 @@ export default function CreatorOverviewPage() {
           </div>
           <button
             type="button"
-            onClick={() => setTourOpen(true)}
+            onClick={() => startCreatorTour()}
+            data-tour="replay-tour"
             className="btn-ghost text-sm"
             aria-label="Replay creator tour"
           >
@@ -70,7 +68,7 @@ export default function CreatorOverviewPage() {
           <CreatorTermsModal status={termsStatus} onAccepted={() => setShowTerms(false)} onClose={() => setShowTerms(false)} />
         )}
 
-        <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section data-tour="kpi-strip" className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KPI icon={<Wallet className="h-5 w-5 text-brand" />} label="Total earnings" value={formatINR((stats?.totalRevenue ?? 0) / 100)} delta="all-time" />
           <KPI icon={<Users className="h-5 w-5 text-success" />} label="Total students" value={formatCompact(stats?.totalStudents ?? 0)} delta="across all courses" />
           <KPI icon={<BookOpen className="h-5 w-5 text-brand-accent" />} label="Published courses" value={String(stats?.courseCount ?? 0)} delta="excluding drafts" />

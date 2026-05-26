@@ -95,6 +95,10 @@ export function Navbar({ variant }: { variant?: "learner" | "creator" | "admin" 
               <Link
                 key={l.href}
                 href={l.href}
+                // Stable data-tour slug for the creator onboarding tour to anchor
+                // popovers on (e.g. "nav-courses" → "/creator/courses"). Slug is
+                // last URL segment, prefixed with "nav-".
+                data-tour={v === "creator" ? `nav-${l.href.split("/").pop()}` : undefined}
                 className={cn(
                   "rounded-full px-3 py-1.5 text-sm font-medium transition",
                   pathname === l.href || pathname.startsWith(l.href + "/")

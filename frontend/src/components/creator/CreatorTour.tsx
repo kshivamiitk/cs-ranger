@@ -1,249 +1,224 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
-import { LayoutDashboard, BookOpen, Plus, Wallet, HardDrive, PartyPopper, X, ArrowLeft, ArrowRight, Check } from "lucide-react";
+import { useCallback, useEffect, useRef } from "react";
+import { useRouter, usePathname } from "next/navigation";
+import { driver, type Driver } from "driver.js";
+import "driver.js/dist/driver.css";
 
-// Bump the version suffix when the tour content changes — that re-shows it
-// for every creator (one-time, until they dismiss again).
-const TOUR_STORAGE_KEY = "cs-ranger-creator-tour-v1";
+// Bump the version when STEPS changes so existing creators see the new tour once.
+const STORAGE_KEY = "cs-ranger-creator-tour-v2";
 
-export function hasSeenCreatorTour(): boolean {
-  if (typeof window === "undefined") return true; // SSR: assume seen, only client shows it
-  return window.localStorage.getItem(TOUR_STORAGE_KEY) === "done";
-}
-
-function markCreatorTourDone() {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(TOUR_STORAGE_KEY, "done");
-}
-
-export function resetCreatorTour() {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(TOUR_STORAGE_KEY);
-}
-
-interface Step {
-  icon: React.ReactNode;
+interface TourStep {
+  route: string;          // pathname where this step's anchor lives
+  element?: string;       // CSS selector. Omit to center the popover on screen.
   title: string;
-  body: React.ReactNode;
-  hint?: React.ReactNode;
-  cta?: { label: string; href: string };
+  description: string;
 }
 
-const STEPS: Step[] = [
+// One coherent narrative: welcome → stats → courses tab → New-course button →
+// finance → storage → replay-button reminder → done.
+const STEPS: TourStep[] = [
   {
-    icon: <LayoutDashboard className="h-8 w-8 text-brand" />,
-    title: "Welcome to your creator dashboard",
-    body: (
-      <p>
-        This overview is your home base — wallet balance, recent sales, course performance, and
-        pending learner doubts all show up here at a glance.
-      </p>
-    ),
-    hint: <>Stats refresh every few minutes. Big numbers = good.</>,
+    route: "/creator/overview",
+    title: "Welcome to your creator dashboard 🎉",
+    description:
+      "This is a one-minute tour. We'll point at each major button — Courses, Finance, Storage — so you know where to click for what. Hit <strong>Next →</strong> to start.",
   },
   {
-    icon: <BookOpen className="h-8 w-8 text-brand" />,
-    title: "Your courses",
-    body: (
-      <p>
-        Every course you publish lives in <strong>Courses</strong>. Each course is a tree —
-        modules contain lessons, and a lesson can be a <strong>video</strong>, a{" "}
-        <strong>markdown article</strong>, a <strong>quiz</strong>, a <strong>PDF</strong>, or even
-        a live <strong>HTML/CSS/JS sandbox</strong>.
-      </p>
-    ),
-    cta: { label: "Open Courses", href: "/creator/courses" },
+    route: "/creator/overview",
+    element: "[data-tour='kpi-strip']",
+    title: "Your stats at a glance",
+    description:
+      "Total earnings, student count, published courses, and average rating. Refreshes every few minutes — this is the first thing you'll see every login.",
   },
   {
-    icon: <Plus className="h-8 w-8 text-brand" />,
-    title: "Ship your first course",
-    body: (
-      <p>
-        Click <strong>New course</strong>, fill in the title and pricing, then start adding modules
-        and lessons. You can save a draft anytime — only published courses are visible to learners,
-        and each goes through a quick review before going live.
-      </p>
-    ),
-    hint: <>You don&rsquo;t have to finish in one sitting — every change autosaves.</>,
-    cta: { label: "Create a course", href: "/creator/courses/new" },
+    route: "/creator/overview",
+    element: "[data-tour='nav-courses']",
+    title: "Step 1 — open the Courses tab",
+    description:
+      "This is where every course you author lives. Drafts, published, archived — all here. Click <strong>Next →</strong> and we'll head over.",
   },
   {
-    icon: <Wallet className="h-8 w-8 text-brand" />,
-    title: "Finance & payouts",
-    body: (
-      <p>
-        Every sale shows up under <strong>Finance</strong>. The platform takes a flat commission
-        (currently 20%); the rest lands in your wallet. Withdraw to your bank account after
-        you&rsquo;ve completed KYC there once — payouts are batched weekly.
-      </p>
-    ),
-    hint: <>Refunds within the 7-day window are automatically deducted from your wallet.</>,
-    cta: { label: "Open Finance", href: "/creator/finance" },
+    route: "/creator/courses",
+    element: "[data-tour='new-course']",
+    title: "Step 2 — create a new course",
+    description:
+      "Click this button to start a course. You'll fill in the title, subtitle, thumbnail, and price, then add modules → lessons inside the builder. A lesson can be a video, markdown article, quiz, PDF, or a live HTML/CSS/JS sandbox.",
   },
   {
-    icon: <HardDrive className="h-8 w-8 text-brand" />,
-    title: "Storage quota",
-    body: (
-      <p>
-        PDFs and other attachments count against your storage quota. You start with{" "}
-        <strong>1 MB free</strong> and can buy extra in chunks. Video lessons live on our CDN
-        separately and don&rsquo;t use your quota.
-      </p>
-    ),
-    cta: { label: "Check storage", href: "/creator/storage" },
+    route: "/creator/overview",
+    element: "[data-tour='nav-finance']",
+    title: "Step 3 — Finance & payouts",
+    description:
+      "Every sale shows up here. 80% lands in your wallet, 20% is the platform commission. After KYC, you can withdraw to your bank. Refunds (7-day window) are auto-deducted.",
   },
   {
-    icon: <PartyPopper className="h-8 w-8 text-brand" />,
-    title: "You&rsquo;re set",
-    body: (
-      <p>
-        That&rsquo;s the core flow. Analytics, Collaborations, and Doubts are linked in the top
-        nav whenever you want to explore them. Hit <strong>Take the tour</strong> on this page any
-        time to replay this walkthrough.
-      </p>
-    ),
-    hint: (
-      <>
-        Stuck? Email{" "}
-        <a href="mailto:support@cs-ranger.in" className="underline">
-          support@cs-ranger.in
-        </a>
-        .
-      </>
-    ),
+    route: "/creator/overview",
+    element: "[data-tour='nav-storage']",
+    title: "Step 4 — Storage quota",
+    description:
+      "PDFs and lesson attachments use your storage (1 MB free to start; buy more anytime). Video lessons live on our CDN separately, so they don't count.",
+  },
+  {
+    route: "/creator/overview",
+    element: "[data-tour='nav-analytics']",
+    title: "Step 5 — Course analytics",
+    description:
+      "Enrollment trends, completion rates, per-course ratings. Useful once you have students — gives you signal on which courses to invest more in.",
+  },
+  {
+    route: "/creator/overview",
+    element: "[data-tour='replay-tour']",
+    title: "Replay this tour anytime ✨",
+    description:
+      "If you ever want a refresher, hit this button on the Overview page and we'll walk through it again. You're all set — happy creating! Email <a href='mailto:support@cs-ranger.in' class='underline'>support@cs-ranger.in</a> if you get stuck.",
   },
 ];
 
-export function CreatorTour({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [step, setStep] = useState(0);
+// ───────────────────── localStorage state ─────────────────────
+interface TourState { active: boolean; step: number; done?: boolean }
 
-  const close = useCallback(() => {
-    markCreatorTourDone();
-    setStep(0);
-    onClose();
-  }, [onClose]);
+function getTourState(): TourState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as TourState) : null;
+  } catch { return null; }
+}
+function saveTourState(state: TourState) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+function finishTour() {
+  saveTourState({ active: false, step: 0, done: true });
+}
 
-  // Esc closes; arrow keys navigate
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") close();
-      else if (e.key === "ArrowRight") setStep((s) => Math.min(s + 1, STEPS.length - 1));
-      else if (e.key === "ArrowLeft") setStep((s) => Math.max(s - 1, 0));
+// Has this creator already seen (or dismissed) the tour?
+export function hasSeenCreatorTour(): boolean {
+  if (typeof window === "undefined") return true;
+  const s = getTourState();
+  return !!s?.done;
+}
+
+// Imperative trigger for the "Take the tour" button.
+export function startCreatorTour() {
+  saveTourState({ active: true, step: 0 });
+  if (typeof window === "undefined") return;
+  if (window.location.pathname !== STEPS[0].route) {
+    window.location.href = STEPS[0].route;
+  } else {
+    window.dispatchEvent(new Event("cs-tour-start"));
+  }
+}
+
+// ───────────────────── boot component ─────────────────────
+// Mount once per creator page (via app/creator/layout.tsx). It reads tour state
+// on every navigation; if a tour is active and the current step's route matches
+// the current pathname, it spotlights the right element via driver.js. If the
+// route doesn't match, it navigates to the right one — the new page's mount
+// will re-trigger this hook.
+
+export function CreatorTourBoot() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const driverRef = useRef<Driver | null>(null);
+
+  // Run a single step (we re-create driver.js per step because driver.js doesn't
+  // natively handle steps across navigations).
+  const runStep = useCallback((stepIndex: number) => {
+    const step = STEPS[stepIndex];
+    if (!step) { finishTour(); return; }
+
+    // Different page? Save state and navigate. The new page's mount picks up.
+    if (step.route !== pathname) {
+      saveTourState({ active: true, step: stepIndex });
+      router.push(step.route);
+      return;
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, close]);
 
-  if (!open) return null;
+    // Wait briefly for the page to settle, then spotlight.
+    const t = setTimeout(() => {
+      // If the step has an element selector but the element isn't there yet, skip.
+      if (step.element && !document.querySelector(step.element)) {
+        // Try again once after another short delay (slow renders/queries).
+        setTimeout(() => doRun(stepIndex), 400);
+        return;
+      }
+      doRun(stepIndex);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [pathname, router]);
 
-  const current = STEPS[step];
-  const isLast = step === STEPS.length - 1;
-  const isFirst = step === 0;
+  const doRun = useCallback((stepIndex: number) => {
+    const step = STEPS[stepIndex];
+    if (!step) return;
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="creator-tour-title"
-      onClick={(e) => { if (e.target === e.currentTarget) close(); }}
-    >
-      <div className="card relative w-full max-w-md p-6 md:p-8 animate-slide-up">
-        <button
-          type="button"
-          onClick={close}
-          aria-label="Close tour"
-          className="absolute right-3 top-3 rounded-full p-1.5 text-fg-dim transition hover:bg-surface-2 hover:text-fg"
-        >
-          <X className="h-4 w-4" />
-        </button>
+    // Clean up any prior driver instance.
+    if (driverRef.current) {
+      try { driverRef.current.destroy(); } catch { /* ignore */ }
+      driverRef.current = null;
+    }
 
-        <div className="flex items-center gap-3">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-brand/10">
-            {current.icon}
-          </span>
-          <p className="text-xs font-semibold uppercase tracking-widest text-fg-dim">
-            Step {step + 1} of {STEPS.length}
-          </p>
-        </div>
+    const isLast = stepIndex === STEPS.length - 1;
+    const isFirst = stepIndex === 0;
 
-        <h2 id="creator-tour-title" className="heading-3 mt-4">
-          {current.title}
-        </h2>
-        <div className="mt-3 text-sm text-fg-dim leading-relaxed">{current.body}</div>
-        {current.hint && (
-          <p className="mt-3 rounded-lg border border-border bg-surface-2 p-3 text-xs text-fg-dim">
-            💡 {current.hint}
-          </p>
-        )}
+    const d = driver({
+      animate: true,
+      allowClose: true,
+      overlayOpacity: 0.6,
+      stagePadding: 6,
+      stageRadius: 8,
+      showButtons: ["next", "previous", "close"],
+      nextBtnText: isLast ? "Finish" : "Next →",
+      prevBtnText: "← Back",
+      doneBtnText: "Finish",
+      progressText: `${stepIndex + 1} / ${STEPS.length}`,
+      showProgress: true,
+      disableActiveInteraction: true,
+      steps: [
+        {
+          element: step.element,
+          popover: {
+            title: step.title,
+            description: step.description,
+            side: "bottom",
+            align: "start",
+          },
+        },
+      ],
+      onCloseClick: () => { finishTour(); d.destroy(); driverRef.current = null; },
+      onPrevClick: () => {
+        d.destroy(); driverRef.current = null;
+        if (!isFirst) runStep(stepIndex - 1);
+      },
+      onNextClick: () => {
+        d.destroy(); driverRef.current = null;
+        if (isLast) { finishTour(); }
+        else { runStep(stepIndex + 1); }
+      },
+    });
+    driverRef.current = d;
+    d.drive();
+  }, [runStep]);
 
-        {current.cta && (
-          <Link
-            href={current.cta.href}
-            onClick={close}
-            className="btn-ghost mt-4 w-full text-sm"
-          >
-            {current.cta.label} <ArrowRight className="h-4 w-4" />
-          </Link>
-        )}
+  // On mount / pathname change: if a tour is in-progress and its step belongs
+  // to this page, resume here.
+  useEffect(() => {
+    const state = getTourState();
+    if (state?.active) {
+      runStep(state.step);
+    }
+    function onStart() { saveTourState({ active: true, step: 0 }); runStep(0); }
+    window.addEventListener("cs-tour-start", onStart);
+    return () => {
+      window.removeEventListener("cs-tour-start", onStart);
+      if (driverRef.current) {
+        try { driverRef.current.destroy(); } catch { /* ignore */ }
+        driverRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
-        {/* Step dots */}
-        <div className="mt-6 flex items-center justify-center gap-1.5">
-          {STEPS.map((_, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => setStep(i)}
-              aria-label={`Go to step ${i + 1}`}
-              className={`h-1.5 rounded-full transition-all ${
-                i === step ? "w-6 bg-brand" : "w-1.5 bg-border hover:bg-fg-dim"
-              }`}
-            />
-          ))}
-        </div>
-
-        {/* Bottom nav */}
-        <div className="mt-5 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={close}
-            className="text-xs text-fg-dim hover:text-fg"
-          >
-            Skip tour
-          </button>
-          <div className="flex gap-2">
-            {!isFirst && (
-              <button
-                type="button"
-                onClick={() => setStep((s) => s - 1)}
-                className="btn-ghost text-sm"
-              >
-                <ArrowLeft className="h-4 w-4" /> Back
-              </button>
-            )}
-            {!isLast ? (
-              <button
-                type="button"
-                onClick={() => setStep((s) => s + 1)}
-                className="btn-primary text-sm"
-              >
-                Next <ArrowRight className="h-4 w-4" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={close}
-                className="btn-primary text-sm"
-              >
-                <Check className="h-4 w-4" /> Finish
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 }

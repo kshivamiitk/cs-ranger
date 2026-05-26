@@ -27,7 +27,7 @@ export default function CreatorCoursesPage() {
             <h1 className="heading-2">Your courses</h1>
             <p className="mt-1 text-sm text-fg-dim">{own.length} courses</p>
           </div>
-          <Link href="/creator/courses/new" className="btn-primary"><Plus className="h-4 w-4" /> Create new</Link>
+          <Link href="/creator/courses/new" data-tour="new-course" className="btn-primary"><Plus className="h-4 w-4" /> Create new</Link>
         </div>
 
         {isLoading ? (
