@@ -175,7 +175,7 @@ export default function TransactionsPage() {
             next compliance step; CSV export covers the basic record-keeping
             requirement today. */}
         <p className="mt-4 text-xs text-fg-dim">
-          All prices are in INR and inclusive of applicable taxes. A formal GST invoice can be requested at support@cs-ranger.dev.
+          All prices are in INR and inclusive of applicable taxes. A formal GST invoice can be requested at support@learnrift.dev.
         </p>
 
         {refundTarget && (

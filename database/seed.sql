@@ -21,14 +21,14 @@ on conflict (name) do nothing;
 
 -- ====== Users ======
 insert into users (id, email, password_hash, is_verified, created_at) values
-  ('00000000-0000-0000-0000-000000000001', 'you@cs-ranger.dev',    '$2y$12$placeholder', true, '2025-08-10T10:00:00Z'),
-  ('00000000-0000-0000-0000-000000000002', 'ananya@cs-ranger.dev', '$2y$12$placeholder', true, '2024-12-01T10:00:00Z'),
-  ('00000000-0000-0000-0000-000000000003', 'rohan@cs-ranger.dev',  '$2y$12$placeholder', true, '2024-09-14T10:00:00Z'),
-  ('00000000-0000-0000-0000-000000000004', 'sneha@cs-ranger.dev',  '$2y$12$placeholder', true, '2024-11-20T10:00:00Z'),
-  ('00000000-0000-0000-0000-000000000005', 'vikram@cs-ranger.dev', '$2y$12$placeholder', true, '2024-07-04T10:00:00Z'),
-  ('00000000-0000-0000-0000-000000000006', 'priya@cs-ranger.dev',  '$2y$12$placeholder', true, '2025-02-10T10:00:00Z'),
-  ('00000000-0000-0000-0000-000000000007', 'kabir@cs-ranger.dev',  '$2y$12$placeholder', true, '2025-03-15T10:00:00Z'),
-  ('00000000-0000-0000-0000-00000000ad01', 'admin@cs-ranger.dev',  '$2y$12$placeholder', true, '2024-01-01T00:00:00Z')
+  ('00000000-0000-0000-0000-000000000001', 'you@learnrift.dev',    '$2y$12$placeholder', true, '2025-08-10T10:00:00Z'),
+  ('00000000-0000-0000-0000-000000000002', 'ananya@learnrift.dev', '$2y$12$placeholder', true, '2024-12-01T10:00:00Z'),
+  ('00000000-0000-0000-0000-000000000003', 'rohan@learnrift.dev',  '$2y$12$placeholder', true, '2024-09-14T10:00:00Z'),
+  ('00000000-0000-0000-0000-000000000004', 'sneha@learnrift.dev',  '$2y$12$placeholder', true, '2024-11-20T10:00:00Z'),
+  ('00000000-0000-0000-0000-000000000005', 'vikram@learnrift.dev', '$2y$12$placeholder', true, '2024-07-04T10:00:00Z'),
+  ('00000000-0000-0000-0000-000000000006', 'priya@learnrift.dev',  '$2y$12$placeholder', true, '2025-02-10T10:00:00Z'),
+  ('00000000-0000-0000-0000-000000000007', 'kabir@learnrift.dev',  '$2y$12$placeholder', true, '2025-03-15T10:00:00Z'),
+  ('00000000-0000-0000-0000-00000000ad01', 'admin@learnrift.dev',  '$2y$12$placeholder', true, '2024-01-01T00:00:00Z')
 on conflict (id) do nothing;
 
 insert into user_roles (user_id, role) values

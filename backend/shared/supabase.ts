@@ -26,7 +26,7 @@ export function supabaseAdmin(): SupabaseClient {
   }
   _admin = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { "x-application-name": "cs-ranger-backend" } },
+    global: { headers: { "x-application-name": "learnrift-backend" } },
   });
   return _admin;
 }

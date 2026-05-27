@@ -19,12 +19,12 @@ export default function TermsPage() {
         </header>
 
         <article className="markdown-view card space-y-4">
-          <p>Welcome to CS-Ranger.</p>
-          <p>By using CS-Ranger, you agree to these Terms and Conditions.</p>
+          <p>Welcome to LearnRift.</p>
+          <p>By using LearnRift, you agree to these Terms and Conditions.</p>
 
-          <h2>1. About CS-Ranger</h2>
+          <h2>1. About LearnRift</h2>
           <p>
-            CS-Ranger is an online education platform where learners can access digital courses and
+            LearnRift is an online education platform where learners can access digital courses and
             educational content.
           </p>
 
@@ -41,7 +41,7 @@ export default function TermsPage() {
 
           <h2>4. Payments</h2>
           <p>
-            Payments are processed through third-party payment gateway providers. CS-Ranger does not
+            Payments are processed through third-party payment gateway providers. LearnRift does not
             store card, UPI, or banking details directly.
           </p>
 
@@ -56,7 +56,7 @@ export default function TermsPage() {
 
           <h2>6. Creator Content</h2>
           <p>
-            Courses may be created by independent creators. CS-Ranger may review, approve, reject,
+            Courses may be created by independent creators. LearnRift may review, approve, reject,
             suspend, or remove content that violates platform rules.
           </p>
 
@@ -68,18 +68,18 @@ export default function TermsPage() {
 
           <h2>8. Account Suspension</h2>
           <p>
-            CS-Ranger may suspend accounts involved in fraud, abuse, policy violation, or illegal
+            LearnRift may suspend accounts involved in fraud, abuse, policy violation, or illegal
             activity.
           </p>
 
           <h2>9. Changes to Terms</h2>
-          <p>CS-Ranger may update these terms from time to time.</p>
+          <p>LearnRift may update these terms from time to time.</p>
 
           <h2>10. Contact</h2>
           <p>
             For questions, contact{" "}
-            <a href="mailto:legal@cs-ranger.in" className="underline">
-              legal@cs-ranger.in
+            <a href="mailto:legal@learnrift.in" className="underline">
+              legal@learnrift.in
             </a>
             .
           </p>

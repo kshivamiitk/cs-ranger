@@ -1,4 +1,4 @@
-# CS-Ranger — Creator Bulk Payouts: Complete Setup Guide
+# LearnRift — Creator Bulk Payouts: Complete Setup Guide
 
 How money moves from a learner's checkout all the way into a creator's bank
 account, every config knob you need to turn, and every checkpoint to verify it

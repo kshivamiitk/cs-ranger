@@ -19,7 +19,7 @@ export default function LearnerTermsPage() {
         </header>
 
         <article className="markdown-view card space-y-4">
-          <p>These Learner Terms apply to users who access courses on CS-Ranger.</p>
+          <p>These Learner Terms apply to users who access courses on LearnRift.</p>
 
           <h2>1. Course Access</h2>
           <p>
@@ -52,14 +52,14 @@ export default function LearnerTermsPage() {
 
           <h2>6. Account Suspension</h2>
           <p>
-            CS-Ranger may suspend accounts involved in misuse, fraud, abuse, or policy violations.
+            LearnRift may suspend accounts involved in misuse, fraud, abuse, or policy violations.
           </p>
 
           <h2>7. Contact</h2>
           <p>
             For learner support, contact{" "}
-            <a href="mailto:support@cs-ranger.in" className="underline">
-              support@cs-ranger.in
+            <a href="mailto:support@learnrift.in" className="underline">
+              support@learnrift.in
             </a>
             .
           </p>

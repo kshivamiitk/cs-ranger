@@ -27,7 +27,7 @@ export function CourseCompletionModal({
       const certId = claim.data?.certificate.id;
       if (!certId) throw new Error("Claim the certificate first");
       const blob = await api.achievements.downloadCertificate(certId);
-      saveBlob(blob, `cs-ranger-certificate-${certId}.pdf`);
+      saveBlob(blob, `learnrift-certificate-${certId}.pdf`);
     },
     onError: (e) => setDownloadError(e instanceof Error ? e.message : "Download failed"),
   });

@@ -32,7 +32,7 @@ export async function dispatchRazorpayPayout(d: { fundAccountId: string; amountP
         purpose: "payout",
         queue_if_low_balance: true,
         reference_id: d.referenceId,
-        narration: d.narration || "CS-Ranger creator payout",
+        narration: d.narration || "LearnRift creator payout",
       }),
     });
     const data = await resp.json() as { id?: string; error?: { description?: string } };

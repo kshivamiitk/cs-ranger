@@ -236,7 +236,7 @@ app.post("/manual", requireRole("admin"), async (req, res) => {
       amountPaise,
       idempotencyKey: `manual-${runId}-${creatorId}`,
       referenceId: `run_${runId}_${creatorId}`,
-      narration: "CS-Ranger manual payout",
+      narration: "LearnRift manual payout",
     });
     if (dispatched.error) { status = "failed"; errorMsg = dispatched.error; }
     else payoutId = dispatched.payoutId;
@@ -477,7 +477,7 @@ app.post("/:payoutItemId/retry", requireRole("admin"), async (req, res) => {
       amountPaise: item.amount,
       idempotencyKey: `retry-${item.id}-${attempt}`,
       referenceId: `retry_${item.id}_${attempt}`,
-      narration: "CS-Ranger payout retry",
+      narration: "LearnRift payout retry",
     });
     if (dispatched.error) { status = "failed"; errorMsg = dispatched.error; }
     else payoutId = dispatched.payoutId;
@@ -634,10 +634,10 @@ app.get("/statements/annual/download", requireAuth, async (req, res) => {
   try {
     if (format === "csv") {
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename="cs-ranger-statement-${statement.financialYear}.csv"`);
+      res.setHeader("Content-Disposition", `attachment; filename="learnrift-statement-${statement.financialYear}.csv"`);
       return res.send(statementCsv(creator.name, statement));
     }
-    const siteName = await getPlatformSetting("site_name", "CS-Ranger");
+    const siteName = await getPlatformSetting("site_name", "LearnRift");
     const bytes = await buildAnnualStatementPdf({
       siteName: String(siteName),
       creatorName: creator.name,
@@ -655,7 +655,7 @@ app.get("/statements/annual/download", requireAuth, async (req, res) => {
       isEstimate: statement.isEstimate,
     });
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="cs-ranger-statement-${statement.financialYear}.pdf"`);
+    res.setHeader("Content-Disposition", `attachment; filename="learnrift-statement-${statement.financialYear}.pdf"`);
     res.send(Buffer.from(bytes));
   } catch (e) {
     log.error("annual statement render failed", { err: e instanceof Error ? e.message : String(e) });

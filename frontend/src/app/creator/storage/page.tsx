@@ -66,7 +66,7 @@ export default function CreatorStoragePage() {
           key: order.keyId,
           amount: order.amountPaise,
           currency: order.currency,
-          name: "CS-Ranger Storage",
+          name: "LearnRift Storage",
           description: `${order.mb} MB · valid for ${usage?.pricing.durationDays || 30} days`,
           order_id: order.orderId,
           prefill: { name: user?.displayName || user?.display_name || undefined, email: user?.email || undefined },

@@ -1,4 +1,4 @@
-# CS-Ranger
+# LearnRift
 
 An online education marketplace for college students and early-career engineers. Built per the spec in [`Docs/`](Docs/).
 

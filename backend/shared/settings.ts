@@ -31,7 +31,7 @@ let _cache: { value: PlatformSettings; expiresAt: number } | null = null;
 /** Env-driven defaults — read at call time so dotenv load order doesn't matter. */
 export function platformSettingDefaults(): PlatformSettings {
   return {
-    site_name: process.env.NEXT_PUBLIC_SITE_NAME || "CS-Ranger",
+    site_name: process.env.NEXT_PUBLIC_SITE_NAME || "LearnRift",
     commission_rate: Number(process.env.PLATFORM_COMMISSION_RATE || 0.15),
     min_payout_inr: Number(process.env.PLATFORM_MIN_PAYOUT_INR || 500),
     refund_window_days: Number(process.env.PLATFORM_REFUND_WINDOW_DAYS || 7),

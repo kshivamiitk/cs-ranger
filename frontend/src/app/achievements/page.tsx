@@ -111,7 +111,7 @@ function CertificateCard({ cert }: { cert: CertificateItem }) {
   const download = useMutation({
     mutationFn: async () => {
       const blob = await api.achievements.downloadCertificate(cert.id);
-      saveBlob(blob, `cs-ranger-certificate-${cert.id}.pdf`);
+      saveBlob(blob, `learnrift-certificate-${cert.id}.pdf`);
     },
     onError: (e) => setError(e instanceof Error ? e.message : "Download failed"),
   });

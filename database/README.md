@@ -1,4 +1,4 @@
-# CS-Ranger — Database
+# LearnRift — Database
 
 PostgreSQL schema for Supabase (or any Postgres 15+). Covers every table referenced in `Docs/design.md §5` plus the indexes, triggers, and Row-Level Security policies needed to run the platform safely.
 

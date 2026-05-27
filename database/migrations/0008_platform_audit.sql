@@ -11,7 +11,7 @@ create table if not exists platform_settings (
 );
 
 insert into platform_settings (key, value, description) values
-  ('site_name',              '"CS-Ranger"'::jsonb,        'Public site name'),
+  ('site_name',              '"LearnRift"'::jsonb,        'Public site name'),
   ('commission_rate',        '0.15'::jsonb,                'Platform fee as a fraction (0.15 = 15%)'),
   ('min_payout_inr',         '500'::jsonb,                 'Minimum pending balance (₹) before payout'),
   ('refund_window_days',     '7'::jsonb,                   'No-questions-asked refund window in days'),

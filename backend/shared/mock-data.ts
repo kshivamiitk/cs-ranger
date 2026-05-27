@@ -13,14 +13,14 @@ export const categories: Category[] = [
 ];
 
 export const users: User[] = [
-  { id: "u1", email: "you@cs-ranger.dev", displayName: "Arjun Mehta", username: "arjun", avatarUrl: ava("arjun"), bio: "Final-year CS at IIT Bombay.", college: "IIT Bombay", roles: ["learner", "creator"], isVerified: true, createdAt: "2025-08-10T10:00:00Z" },
-  { id: "u2", email: "ananya@cs-ranger.dev", displayName: "Ananya Iyer", username: "ananya", avatarUrl: ava("ananya"), bio: "Teaching DSA without the gatekeeping.", college: "BITS Pilani", roles: ["creator", "learner"], isVerified: true, createdAt: "2024-12-01T10:00:00Z" },
-  { id: "u3", email: "rohan@cs-ranger.dev", displayName: "Rohan Kapoor", username: "rohan", avatarUrl: ava("rohan"), bio: "Backend nerd.", college: "NIT Trichy", roles: ["creator"], isVerified: true, createdAt: "2024-09-14T10:00:00Z" },
-  { id: "u4", email: "sneha@cs-ranger.dev", displayName: "Sneha Reddy", username: "sneha", avatarUrl: ava("sneha"), bio: "ML researcher.", college: "IIIT Hyderabad", roles: ["creator"], isVerified: true, createdAt: "2024-11-20T10:00:00Z" },
-  { id: "u5", email: "vikram@cs-ranger.dev", displayName: "Vikram Singh", username: "vikram", avatarUrl: ava("vikram"), bio: "Distributed systems.", college: "IIT Delhi", roles: ["creator"], isVerified: true, createdAt: "2024-07-04T10:00:00Z" },
-  { id: "u6", email: "priya@cs-ranger.dev", displayName: "Priya Sharma", username: "priya", avatarUrl: ava("priya"), college: "VIT Vellore", roles: ["learner"], isVerified: true, createdAt: "2025-02-10T10:00:00Z" },
-  { id: "u7", email: "kabir@cs-ranger.dev", displayName: "Kabir Khanna", username: "kabir", avatarUrl: ava("kabir"), college: "DTU", roles: ["learner"], isVerified: true, createdAt: "2025-03-15T10:00:00Z" },
-  { id: "admin1", email: "admin@cs-ranger.dev", displayName: "Platform Admin", username: "admin", avatarUrl: ava("admin"), roles: ["admin"], isVerified: true, createdAt: "2024-01-01T00:00:00Z" },
+  { id: "u1", email: "you@learnrift.dev", displayName: "Arjun Mehta", username: "arjun", avatarUrl: ava("arjun"), bio: "Final-year CS at IIT Bombay.", college: "IIT Bombay", roles: ["learner", "creator"], isVerified: true, createdAt: "2025-08-10T10:00:00Z" },
+  { id: "u2", email: "ananya@learnrift.dev", displayName: "Ananya Iyer", username: "ananya", avatarUrl: ava("ananya"), bio: "Teaching DSA without the gatekeeping.", college: "BITS Pilani", roles: ["creator", "learner"], isVerified: true, createdAt: "2024-12-01T10:00:00Z" },
+  { id: "u3", email: "rohan@learnrift.dev", displayName: "Rohan Kapoor", username: "rohan", avatarUrl: ava("rohan"), bio: "Backend nerd.", college: "NIT Trichy", roles: ["creator"], isVerified: true, createdAt: "2024-09-14T10:00:00Z" },
+  { id: "u4", email: "sneha@learnrift.dev", displayName: "Sneha Reddy", username: "sneha", avatarUrl: ava("sneha"), bio: "ML researcher.", college: "IIIT Hyderabad", roles: ["creator"], isVerified: true, createdAt: "2024-11-20T10:00:00Z" },
+  { id: "u5", email: "vikram@learnrift.dev", displayName: "Vikram Singh", username: "vikram", avatarUrl: ava("vikram"), bio: "Distributed systems.", college: "IIT Delhi", roles: ["creator"], isVerified: true, createdAt: "2024-07-04T10:00:00Z" },
+  { id: "u6", email: "priya@learnrift.dev", displayName: "Priya Sharma", username: "priya", avatarUrl: ava("priya"), college: "VIT Vellore", roles: ["learner"], isVerified: true, createdAt: "2025-02-10T10:00:00Z" },
+  { id: "u7", email: "kabir@learnrift.dev", displayName: "Kabir Khanna", username: "kabir", avatarUrl: ava("kabir"), college: "DTU", roles: ["learner"], isVerified: true, createdAt: "2025-03-15T10:00:00Z" },
+  { id: "admin1", email: "admin@learnrift.dev", displayName: "Platform Admin", username: "admin", avatarUrl: ava("admin"), roles: ["admin"], isVerified: true, createdAt: "2024-01-01T00:00:00Z" },
 ];
 
 function makeNodes(mid: string, n: number): CourseNode[] {

@@ -49,7 +49,7 @@ export function useRazorpayCheckout(opts: { onSuccess?: (courseId: string) => vo
         key: rzpKey,
         amount: order.amount,
         currency: order.currency,
-        name: "CS-Ranger",
+        name: "LearnRift",
         description: courseTitle || order.courseTitle || "Course enrollment",
         order_id: order.orderId,
         prefill: { name: user?.display_name || user?.displayName, email: user?.email },

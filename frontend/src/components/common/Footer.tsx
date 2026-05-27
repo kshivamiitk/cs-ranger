@@ -40,29 +40,29 @@ export function Footer() {
             ]}
           />
           <div>
-            <h4 className="mb-3 text-xs font-semibold uppercase tracking-widest text-fg-dim">CS-Ranger</h4>
+            <h4 className="mb-3 text-xs font-semibold uppercase tracking-widest text-fg-dim">LearnRift</h4>
             <ul className="space-y-2 text-sm">
               <li className="text-fg-dim">
                 Website:{" "}
                 <a
-                  href="https://cs-ranger.in"
+                  href="https://learnrift.in"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-fg-dim transition hover:text-fg"
                 >
-                  https://cs-ranger.in
+                  https://learnrift.in
                 </a>
               </li>
               <li className="text-fg-dim">
                 Support:{" "}
-                <a href="mailto:support@cs-ranger.in" className="text-fg-dim transition hover:text-fg">
-                  support@cs-ranger.in
+                <a href="mailto:support@learnrift.in" className="text-fg-dim transition hover:text-fg">
+                  support@learnrift.in
                 </a>
               </li>
               <li className="text-fg-dim">
                 Legal:{" "}
-                <a href="mailto:legal@cs-ranger.in" className="text-fg-dim transition hover:text-fg">
-                  legal@cs-ranger.in
+                <a href="mailto:legal@learnrift.in" className="text-fg-dim transition hover:text-fg">
+                  legal@learnrift.in
                 </a>
               </li>
             </ul>

@@ -201,19 +201,19 @@ export default function LandingPage() {
         <section className="mx-auto mt-16 max-w-3xl px-4 md:px-6">
           <div className="card text-center">
             <p className="text-sm text-fg-dim">
-              CS-Ranger is an online learning platform for digital courses.
+              LearnRift is an online learning platform for digital courses.
             </p>
             <div className="mt-4 flex flex-col items-center justify-center gap-1 text-sm text-fg-dim sm:flex-row sm:gap-6">
               <span>
                 Support:{" "}
-                <a href="mailto:support@cs-ranger.in" className="text-brand hover:underline">
-                  support@cs-ranger.in
+                <a href="mailto:support@learnrift.in" className="text-brand hover:underline">
+                  support@learnrift.in
                 </a>
               </span>
               <span>
                 Legal:{" "}
-                <a href="mailto:legal@cs-ranger.in" className="text-brand hover:underline">
-                  legal@cs-ranger.in
+                <a href="mailto:legal@learnrift.in" className="text-brand hover:underline">
+                  legal@learnrift.in
                 </a>
               </span>
             </div>

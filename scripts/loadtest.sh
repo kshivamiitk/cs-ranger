@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# loadtest.sh — ramped load test against the production CS-Ranger box,
+# loadtest.sh — ramped load test against the production LearnRift box,
 # with server-side metrics captured in parallel. Outputs a single timestamped
 # log file you can attach to bug reports or compare across deploys.
 #
@@ -50,7 +50,7 @@ OUT="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
 exec > >(tee -a "$OUT") 2>&1
 
 echo "================================================================"
-echo " CS-Ranger ramp load test"
+echo " LearnRift ramp load test"
 echo " started:  $(date -u +%FT%TZ)"
 echo " host:     $HOST"
 echo " path:     $TARGET_PATH"

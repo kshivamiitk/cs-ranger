@@ -6,7 +6,7 @@ import { driver, type Driver } from "driver.js";
 import "driver.js/dist/driver.css";
 
 // Bump the version when STEPS changes so existing creators see the new tour once.
-const STORAGE_KEY = "cs-ranger-creator-tour-v2";
+const STORAGE_KEY = "learnrift-creator-tour-v2";
 
 interface TourStep {
   route: string;          // pathname where this step's anchor lives
@@ -71,7 +71,7 @@ const STEPS: TourStep[] = [
     element: "[data-tour='replay-tour']",
     title: "Replay this tour anytime ✨",
     description:
-      "If you ever want a refresher, hit this button on the Overview page and we'll walk through it again. You're all set — happy creating! Email <a href='mailto:support@cs-ranger.in' class='underline'>support@cs-ranger.in</a> if you get stuck.",
+      "If you ever want a refresher, hit this button on the Overview page and we'll walk through it again. You're all set — happy creating! Email <a href='mailto:support@learnrift.in' class='underline'>support@learnrift.in</a> if you get stuck.",
   },
 ];
 

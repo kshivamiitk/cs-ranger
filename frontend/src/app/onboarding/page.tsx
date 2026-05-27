@@ -166,7 +166,7 @@ export default function OnboardingPage() {
         <div className="card mt-6">
           {step === 0 && (
             <div>
-              <h1 className="heading-3">How will you use CS-Ranger?</h1>
+              <h1 className="heading-3">How will you use LearnRift?</h1>
               <p className="mt-1 text-sm text-fg-dim">You can always add the other role later from the role switcher.</p>
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 {([

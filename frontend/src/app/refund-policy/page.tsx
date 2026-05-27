@@ -19,7 +19,7 @@ export default function RefundPolicyPage() {
         </header>
 
         <article className="markdown-view card space-y-4">
-          <p>CS-Ranger sells digital educational course access.</p>
+          <p>LearnRift sells digital educational course access.</p>
 
           <h2>Refund Window</h2>
           <p>Users may request a refund within 7 days of purchase.</p>
@@ -49,8 +49,8 @@ export default function RefundPolicyPage() {
 
           <h2>Contact</h2>
           <p>
-            <a href="mailto:support@cs-ranger.in" className="underline">
-              support@cs-ranger.in
+            <a href="mailto:support@learnrift.in" className="underline">
+              support@learnrift.in
             </a>
           </p>
         </article>

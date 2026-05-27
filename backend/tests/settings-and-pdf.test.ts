@@ -12,7 +12,7 @@ describe("platformSettingDefaults", () => {
   it("falls back to the documented defaults when env vars are absent", () => {
     for (const key of ENV_KEYS) delete process.env[key];
     const defaults = platformSettingDefaults();
-    expect(defaults.site_name).toBe("CS-Ranger");
+    expect(defaults.site_name).toBe("LearnRift");
     expect(defaults.commission_rate).toBe(0.15);
     expect(defaults.min_payout_inr).toBe(500);
     expect(defaults.payout_schedule).toBe("manual");

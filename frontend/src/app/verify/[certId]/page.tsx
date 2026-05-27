@@ -25,7 +25,7 @@ export default function CertificateVerifyPage() {
             <div className="bg-mesh-1 p-10 text-center text-white">
               <BadgeCheck className="mx-auto h-14 w-14" />
               <h1 className="mt-3 font-display text-3xl font-bold">Certificate verified</h1>
-              <p className="mt-1 text-white/80">This certificate is authentic and issued by CS-Ranger.</p>
+              <p className="mt-1 text-white/80">This certificate is authentic and issued by LearnRift.</p>
             </div>
             <div className="space-y-5 p-8">
               <Row icon={<GraduationCap className="h-5 w-5" />} label="Awarded to" value={data.profiles?.display_name || "—"} />

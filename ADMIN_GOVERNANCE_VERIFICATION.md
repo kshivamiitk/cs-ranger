@@ -36,7 +36,7 @@ ADMIN='-H "x-user-id: 00000000-0000-0000-0000-00000000ad01" -H "x-user-role: adm
 
 # Platform settings
 eval curl -s $ADMIN http://localhost:4000/api/users/admin/platform-settings | jq .data.settings
-eval curl -s -X PATCH $ADMIN -d "'{\"commission_rate\":0.2,\"site_name\":\"CS-Ranger\"}'" \
+eval curl -s -X PATCH $ADMIN -d "'{\"commission_rate\":0.2,\"site_name\":\"LearnRift\"}'" \
   http://localhost:4000/api/users/admin/platform-settings | jq
 # → expect changedKeys to list only what changed; a commission.update row lands in admin_audit_log
 

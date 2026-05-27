@@ -1,4 +1,4 @@
-# CS-Ranger — Backend
+# LearnRift — Backend
 
 12 microservices + an api-gateway, all in TypeScript on Express, sharing a `@cs-ranger/shared` package via npm workspaces. Each service runs independently and is mocked end-to-end (no Supabase or Razorpay credentials required) so the frontend can hit the gateway and get realistic responses immediately.
 

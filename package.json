@@ -2,7 +2,7 @@
   "name": "cs-ranger",
   "version": "0.1.0",
   "private": true,
-  "description": "CS-Ranger monolith: Next.js frontend + Node backend services, one install, one build, one start.",
+  "description": "LearnRift monolith: Next.js frontend + Node backend services, one install, one build, one start.",
   "scripts": {
     "install:all": "npm install && npm install --prefix frontend && npm install --prefix backend",
     "postinstall": "npm install --prefix frontend --no-audit --no-fund && npm install --prefix backend --no-audit --no-fund",

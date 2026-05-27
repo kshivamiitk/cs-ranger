@@ -194,7 +194,7 @@ function AnnualStatementSection({ creatorId }: { creatorId: string }) {
   const download = useMutation({
     mutationFn: async (format: "pdf" | "csv") => {
       const blob = await api.payouts.downloadAnnualStatement(fy, format);
-      saveBlob(blob, `cs-ranger-statement-${fy}.${format}`);
+      saveBlob(blob, `learnrift-statement-${fy}.${format}`);
     },
     onError: (e) => setDownloadError(e instanceof Error ? e.message : "Download failed"),
   });

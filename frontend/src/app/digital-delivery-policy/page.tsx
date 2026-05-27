@@ -20,11 +20,11 @@ export default function DigitalDeliveryPolicyPage() {
 
         <article className="markdown-view card space-y-4">
           <p>
-            CS-Ranger provides digital educational content and online course access.
+            LearnRift provides digital educational content and online course access.
           </p>
 
           <p>
-            After successful payment, users can access purchased courses through their CS-Ranger
+            After successful payment, users can access purchased courses through their LearnRift
             learner dashboard.
           </p>
 
@@ -40,8 +40,8 @@ export default function DigitalDeliveryPolicyPage() {
 
           <p>
             For access-related issues, contact:{" "}
-            <a href="mailto:support@cs-ranger.in" className="underline">
-              support@cs-ranger.in
+            <a href="mailto:support@learnrift.in" className="underline">
+              support@learnrift.in
             </a>
           </p>
         </article>

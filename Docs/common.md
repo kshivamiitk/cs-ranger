@@ -6,7 +6,7 @@ This document covers everything that is **not role-specific**: the landing page,
 
 ## 1. Website Identity
 
-- **Working name**: CS-Ranger (changeable without a code deploy — stored in an environment variable `NEXT_PUBLIC_SITE_NAME`).
+- **Working name**: LearnRift (changeable without a code deploy — stored in an environment variable `NEXT_PUBLIC_SITE_NAME`).
 - **Logo**: SVG format so it scales crisply at any size. Used in the navbar, email templates, certificates, and the browser tab favicon.
 - **Favicon**: generated from the logo mark (not the full wordmark). Required sizes: 16×16, 32×32, 180×180 (Apple Touch Icon), 192×192 (Android), and a 512×512 PNG for PWA manifest. All generated from a single master SVG via favicon.io or `sharp`.
 - **Brand colors**: defined as CSS custom properties. Both light and dark variants are specified at the root level (`--brand-primary`, `--brand-accent`, etc.) so every component inherits them without hard-coding hex values.
@@ -75,7 +75,7 @@ Collapsible accordion. 6–10 common questions. Content managed by Admin via pla
 - Logo + one-liner tagline.
 - Links: About, Blog, Careers, Privacy Policy, Terms of Service, Refund Policy.
 - Social media icons: Twitter/X, LinkedIn, GitHub, Instagram.
-- Copyright line: "© {year} CS-Ranger. All rights reserved."
+- Copyright line: "© {year} LearnRift. All rights reserved."
 - Theme toggle (for visitors who want to browse the landing page in dark mode).
 
 ---

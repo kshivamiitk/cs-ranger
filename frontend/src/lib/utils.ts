@@ -78,4 +78,4 @@ export function durationFromSeconds(s: number) {
   return `${s}s`;
 }
 
-export const SITE_NAME = process.env.NEXT_PUBLIC_SITE_NAME || "CS-Ranger";
+export const SITE_NAME = process.env.NEXT_PUBLIC_SITE_NAME || "LearnRift";

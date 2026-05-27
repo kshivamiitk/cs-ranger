@@ -19,7 +19,7 @@ export default function PrivacyPage() {
         </header>
 
         <article className="markdown-view card space-y-4">
-          <p>CS-Ranger respects user privacy.</p>
+          <p>LearnRift respects user privacy.</p>
 
           <h2>1. Information We Collect</h2>
           <p>
@@ -35,7 +35,7 @@ export default function PrivacyPage() {
 
           <h2>3. Payments</h2>
           <p>
-            Payments are processed through third-party payment gateway providers. CS-Ranger does not
+            Payments are processed through third-party payment gateway providers. LearnRift does not
             directly store sensitive card or banking details.
           </p>
 
@@ -60,8 +60,8 @@ export default function PrivacyPage() {
           <h2>8. Contact</h2>
           <p>
             For privacy-related questions, contact{" "}
-            <a href="mailto:legal@cs-ranger.in" className="underline">
-              legal@cs-ranger.in
+            <a href="mailto:legal@learnrift.in" className="underline">
+              legal@learnrift.in
             </a>
             .
           </p>

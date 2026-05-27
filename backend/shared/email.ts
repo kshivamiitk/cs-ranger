@@ -24,7 +24,7 @@ export async function sendEmail(opts: SendOpts): Promise<{ ok: boolean; id?: str
     console.log(JSON.stringify({ level: "info", msg: "[email:dev]", ...opts }));
     return { ok: true, reason: "DEV_NO_RESEND" };
   }
-  const from = process.env.EMAIL_FROM || "CS-Ranger <no-reply@cs-ranger.dev>";
+  const from = process.env.EMAIL_FROM || "LearnRift <no-reply@learnrift.dev>";
   const res = await c.emails.send({
     from,
     to: Array.isArray(opts.to) ? opts.to : [opts.to],
@@ -41,7 +41,7 @@ export async function sendEmail(opts: SendOpts): Promise<{ ok: boolean; id?: str
  * Wrap content in the platform's HTML email shell.
  */
 export function emailLayout(content: string, opts: { preheader?: string } = {}): string {
-  const site = process.env.NEXT_PUBLIC_SITE_NAME || "CS-Ranger";
+  const site = process.env.NEXT_PUBLIC_SITE_NAME || "LearnRift";
   return `<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/>
 <title>${site}</title></head>

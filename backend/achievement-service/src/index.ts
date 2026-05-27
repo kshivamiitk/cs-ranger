@@ -144,7 +144,7 @@ async function loadCertificateDetail(db: SupabaseClient, certId: string): Promis
   if (!cert) return null;
   type Row = { id: string; learner_id: string; course_id: string; pdf_url: string | null; verification_token: string; issued_at: string; courses?: { title?: string; creator_id?: string } | null; profiles?: { display_name?: string } | null };
   const r = cert as Row;
-  let creatorName = "CS-Ranger Creator";
+  let creatorName = "LearnRift Creator";
   if (r.courses?.creator_id) {
     const { data: creator } = await db.from("profiles").select("display_name").eq("user_id", r.courses.creator_id).maybeSingle();
     creatorName = creator?.display_name || creatorName;
@@ -157,7 +157,7 @@ async function loadCertificateDetail(db: SupabaseClient, certId: string): Promis
 }
 
 async function renderCertificatePdf(detail: CertificateDetail): Promise<Uint8Array> {
-  const siteName = await getPlatformSetting("site_name", "CS-Ranger");
+  const siteName = await getPlatformSetting("site_name", "LearnRift");
   return buildCertificatePdf({
     siteName: String(siteName),
     learnerName: detail.learnerName,
@@ -275,7 +275,7 @@ app.get("/certificates/:id/download", requireAuth, async (req, res) => {
   try {
     const bytes = await renderCertificatePdf(detail);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="cs-ranger-certificate-${detail.id}.pdf"`);
+    res.setHeader("Content-Disposition", `attachment; filename="learnrift-certificate-${detail.id}.pdf"`);
     res.send(Buffer.from(bytes));
   } catch (e) {
     log.error("certificate pdf render failed", { err: e instanceof Error ? e.message : String(e) });

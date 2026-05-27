@@ -45,7 +45,7 @@ export function CreatorTermsModal({
         </div>
 
         <div className="mt-4 max-h-64 overflow-y-auto rounded-xl border border-border bg-surface-2/60 p-4 text-sm leading-relaxed text-fg-dim">
-          <p className="font-medium text-fg">By publishing on CS-Ranger you agree that:</p>
+          <p className="font-medium text-fg">By publishing on LearnRift you agree that:</p>
           <ol className="mt-2 list-decimal space-y-2 pl-5">
             <li>The platform retains a commission of <b className="text-fg">{commissionPercent}%</b> on every paid enrollment; the remainder is credited to your creator wallet.</li>
             <li>Learners may request a no-questions-asked refund within the platform refund window; refunded enrollments reverse the corresponding wallet credit.</li>

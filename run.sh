@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# run.sh — start CS-Ranger locally.
+# run.sh — start LearnRift locally.
 #
 #   1. Frees the ports the app uses (kills whatever is currently listening).
 #   2. Starts the backend (api-gateway + 12 services) and the frontend (Next.js).
@@ -49,7 +49,7 @@ ensure_deps() {
 cleanup() {
   trap - INT TERM        # disarm so we don't re-enter
   echo
-  echo "▶ Stopping CS-Ranger…"
+  echo "▶ Stopping LearnRift…"
   kill 0 2>/dev/null || true
 }
 trap cleanup INT TERM
@@ -75,7 +75,7 @@ echo "▶ Starting frontend (Next.js :3000)…"
 ) &
 
 echo
-echo "▶ CS-Ranger is starting:"
+echo "▶ LearnRift is starting:"
 echo "    Frontend  → http://localhost:3000"
 echo "    Gateway   → http://localhost:4000   (health: /health)"
 echo "    Ctrl-C to stop everything."

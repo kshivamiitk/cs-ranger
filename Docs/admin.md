@@ -357,7 +357,7 @@ Mathematics
 
 | Setting | Description |
 |---|---|
-| Site Name | The display name of the platform (default: CS-Ranger). Changes the `NEXT_PUBLIC_SITE_NAME` env variable on next deploy OR is read dynamically from DB. |
+| Site Name | The display name of the platform (default: LearnRift). Changes the `NEXT_PUBLIC_SITE_NAME` env variable on next deploy OR is read dynamically from DB. |
 | Site Tagline | Short tagline shown on the landing page hero section. |
 | Contact Email | Platform support email shown in email footers. |
 

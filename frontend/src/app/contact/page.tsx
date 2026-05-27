@@ -5,7 +5,7 @@ import { Footer } from "@/components/common/Footer";
 import { SITE_NAME } from "@/lib/utils";
 
 export const metadata: Metadata = {
-  title: "Contact CS-Ranger",
+  title: "Contact LearnRift",
   description: `Get in touch with ${SITE_NAME} — learner support, legal queries, and business contact information.`,
 };
 
@@ -16,9 +16,9 @@ export default function ContactPage() {
       <main className="mx-auto max-w-3xl px-4 py-12 md:px-6">
         <header className="mb-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-fg-dim">Contact</p>
-          <h1 className="heading-2 mt-1">Contact CS-Ranger</h1>
+          <h1 className="heading-2 mt-1">Contact LearnRift</h1>
           <p className="mt-3 text-base text-fg-dim">
-            CS-Ranger is an online learning platform for digital courses.
+            LearnRift is an online learning platform for digital courses.
           </p>
         </header>
 
@@ -29,10 +29,10 @@ export default function ContactPage() {
               <h3 className="font-display text-lg font-semibold">For learner support</h3>
             </div>
             <a
-              href="mailto:support@cs-ranger.in"
+              href="mailto:support@learnrift.in"
               className="mt-3 inline-flex break-all text-sm font-medium text-brand"
             >
-              support@cs-ranger.in
+              support@learnrift.in
             </a>
           </div>
 
@@ -42,10 +42,10 @@ export default function ContactPage() {
               <h3 className="font-display text-lg font-semibold">For legal, policy, or business queries</h3>
             </div>
             <a
-              href="mailto:legal@cs-ranger.in"
+              href="mailto:legal@learnrift.in"
               className="mt-3 inline-flex break-all text-sm font-medium text-brand"
             >
-              legal@cs-ranger.in
+              legal@learnrift.in
             </a>
           </div>
 
@@ -55,12 +55,12 @@ export default function ContactPage() {
               <h3 className="font-display text-lg font-semibold">Website</h3>
             </div>
             <a
-              href="https://cs-ranger.in"
+              href="https://learnrift.in"
               target="_blank"
               rel="noopener noreferrer"
               className="mt-3 inline-flex break-all text-sm font-medium text-brand"
             >
-              https://cs-ranger.in
+              https://learnrift.in
             </a>
           </div>
 

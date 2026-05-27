@@ -1,12 +1,12 @@
-# Platform Summary — CS-Ranger
+# Platform Summary — LearnRift
 
-> The site name "CS-Ranger" is a placeholder. It is stored in the environment variable `NEXT_PUBLIC_SITE_NAME` and can be changed without modifying any code.
+> The site name "LearnRift" is a placeholder. It is stored in the environment variable `NEXT_PUBLIC_SITE_NAME` and can be changed without modifying any code.
 
 ---
 
 ## What Is This Platform?
 
-CS-Ranger is an **online education marketplace** built specifically for college students and early-career professionals. The core thesis is that the best teachers of foundational CS concepts are often other students — people who just learned the material and remember exactly what was confusing.
+LearnRift is an **online education marketplace** built specifically for college students and early-career professionals. The core thesis is that the best teachers of foundational CS concepts are often other students — people who just learned the material and remember exactly what was confusing.
 
 The platform lets anyone:
 - **Learn**: browse and enroll in courses covering Data Structures, Algorithms, Web Development, Mathematics, and other technical subjects.

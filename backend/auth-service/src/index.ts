@@ -125,9 +125,9 @@ app.post("/register", async (req, res) => {
       const verifyUrl = `${APP_URL}/verify-email?token=${verifyTokenRaw}`;
       await sendEmail({
         to: email,
-        subject: `Verify your CS-Ranger account`,
+        subject: `Verify your LearnRift account`,
         html: emailLayout(`<h1>Welcome, ${displayName.split(" ")[0]}!</h1>
-          <p>Confirm your email to start learning (or teaching) on CS-Ranger.</p>
+          <p>Confirm your email to start learning (or teaching) on LearnRift.</p>
           <p style="margin:24px 0;"><a href="${verifyUrl}" style="display:inline-block;padding:12px 24px;border-radius:999px;background:linear-gradient(135deg,#a78bfa,#22d3ee);color:white;text-decoration:none;font-weight:600;">Verify email</a></p>
           <p style="font-size:13px;color:#94a3b8;">Or paste this link: ${verifyUrl}</p>`),
       });
@@ -252,7 +252,7 @@ app.post("/forgot-password", async (req, res) => {
     const resetUrl = `${APP_URL}/reset-password?token=${raw}`;
     await sendEmail({
       to: email,
-      subject: "Reset your CS-Ranger password",
+      subject: "Reset your LearnRift password",
       html: emailLayout(`<h1>Reset your password</h1>
         <p>Click below to set a new password. The link expires in 1 hour.</p>
         <p style="margin:24px 0;"><a href="${resetUrl}" style="display:inline-block;padding:12px 24px;border-radius:999px;background:linear-gradient(135deg,#a78bfa,#22d3ee);color:white;text-decoration:none;font-weight:600;">Set new password</a></p>

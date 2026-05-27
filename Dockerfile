@@ -1,5 +1,5 @@
 # =================================================================
-# CS-Ranger — single-image monolith
+# LearnRift — single-image monolith
 # Builds frontend (Next.js) + installs backend (13 services run via tsx).
 # `npm start` brings up backend services and Next.js together.
 # =================================================================

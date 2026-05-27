@@ -1,4 +1,4 @@
-# CS-Ranger — API Fetch Performance Audit
+# LearnRift — API Fetch Performance Audit
 
 **Date:** 2026-05-21
 **Scope:** Reduce API fetch latency across the app — fewer round trips, no request

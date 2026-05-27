@@ -19,7 +19,7 @@ export default function CreatorTermsPage() {
         </header>
 
         <article className="markdown-view card space-y-4">
-          <p>These Creator Terms apply to creators who publish courses on CS-Ranger.</p>
+          <p>These Creator Terms apply to creators who publish courses on LearnRift.</p>
 
           <h2>1. Creator Responsibility</h2>
           <p>
@@ -32,13 +32,13 @@ export default function CreatorTermsPage() {
 
           <h2>3. Course Review</h2>
           <p>
-            CS-Ranger may review, approve, reject, suspend, or remove courses that violate platform
+            LearnRift may review, approve, reject, suspend, or remove courses that violate platform
             rules.
           </p>
 
           <h2>4. Platform Commission</h2>
           <p>
-            CS-Ranger may deduct a platform commission from course payments before calculating
+            LearnRift may deduct a platform commission from course payments before calculating
             creator earnings.
           </p>
           <p>
@@ -74,8 +74,8 @@ export default function CreatorTermsPage() {
           <h2>9. Contact</h2>
           <p>
             For creator-related queries, contact{" "}
-            <a href="mailto:support@cs-ranger.in" className="underline">
-              support@cs-ranger.in
+            <a href="mailto:support@learnrift.in" className="underline">
+              support@learnrift.in
             </a>
             .
           </p>

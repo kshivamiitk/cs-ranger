@@ -1,4 +1,4 @@
-# CS-Ranger — Functional Requirements Checklist
+# LearnRift — Functional Requirements Checklist
 
 Cross-referenced against every requirement in `Docs/summary.md`, `common.md`, `design.md`, `learner.md`, `creator.md`, `admin.md`, `course.md`.
 

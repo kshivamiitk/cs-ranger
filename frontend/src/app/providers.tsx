@@ -36,8 +36,8 @@ const queryClient = new QueryClient({
 // localStorage so the navbar (and anything else that reads roles) can render
 // the role toggle immediately on reload — no flicker while /users/me is in
 // flight. The cached copy is replaced as soon as the fresh /me arrives.
-const USER_CACHE_KEY = "cs-ranger:user";
-const ROLE_VIEW_KEY = "cs-ranger:roleView";
+const USER_CACHE_KEY = "learnrift:user";
+const ROLE_VIEW_KEY = "learnrift:roleView";
 
 function readCachedUser(): UserProfile | null {
   if (typeof window === "undefined") return null;
