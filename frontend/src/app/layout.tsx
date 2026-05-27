@@ -11,7 +11,7 @@ const jetbrains = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", 
 export const metadata: Metadata = {
   title: { default: `${SITE_NAME} — Learn CS from people who just got it`, template: `%s · ${SITE_NAME}` },
   description: "An online learning marketplace built for college students and early-career engineers. Learn from creators who just learned it themselves.",
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://learnrift.in"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://learnrift.site"),
   openGraph: {
     title: SITE_NAME,
     description: "Learn CS from people who just got it.",

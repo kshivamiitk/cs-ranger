@@ -71,7 +71,7 @@ const STEPS: TourStep[] = [
     element: "[data-tour='replay-tour']",
     title: "Replay this tour anytime ✨",
     description:
-      "If you ever want a refresher, hit this button on the Overview page and we'll walk through it again. You're all set — happy creating! Email <a href='mailto:support@learnrift.in' class='underline'>support@learnrift.in</a> if you get stuck.",
+      "If you ever want a refresher, hit this button on the Overview page and we'll walk through it again. You're all set — happy creating! Email <a href='mailto:support@learnrift.site' class='underline'>support@learnrift.site</a> if you get stuck.",
   },
 ];
 

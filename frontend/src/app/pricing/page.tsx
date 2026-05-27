@@ -76,7 +76,7 @@ export default function PricingPage() {
         <section className="mt-10">
           <h2 className="heading-3">Questions about pricing?</h2>
           <p className="mt-2 text-sm text-fg-dim">
-            Email <a href="mailto:support@learnrift.dev" className="underline">support@learnrift.dev</a>. The full
+            Email <a href="mailto:support@learnrift.site" className="underline">support@learnrift.site</a>. The full
             commercial terms live in our <Link href="/terms" className="underline">Terms and Conditions</Link>,{" "}
             <Link href="/learner-terms" className="underline">Learner Terms</Link>, and{" "}
             <Link href="/creator-terms" className="underline">Creator Terms</Link>.

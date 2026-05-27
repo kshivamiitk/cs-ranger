@@ -78,8 +78,8 @@ export default function TermsPage() {
           <h2>10. Contact</h2>
           <p>
             For questions, contact{" "}
-            <a href="mailto:legal@learnrift.in" className="underline">
-              legal@learnrift.in
+            <a href="mailto:legal@learnrift.site" className="underline">
+              legal@learnrift.site
             </a>
             .
           </p>

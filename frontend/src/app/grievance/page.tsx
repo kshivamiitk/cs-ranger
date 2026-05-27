@@ -56,12 +56,12 @@ export default function GrievancePage() {
                 <Mail className="h-4 w-4 text-brand" /> Email
               </div>
               <p className="mt-2 break-all text-sm">
-                <a href="mailto:grievance@learnrift.dev" className="text-brand underline">
-                  grievance@learnrift.dev
+                <a href="mailto:grievance@learnrift.site" className="text-brand underline">
+                  grievance@learnrift.site
                 </a>
               </p>
               <p className="mt-1 text-xs text-fg-dim">
-                Backup: <a href="mailto:support@learnrift.dev" className="underline">support@learnrift.dev</a>
+                Backup: <a href="mailto:support@learnrift.site" className="underline">support@learnrift.site</a>
               </p>
             </div>
           </div>
@@ -96,7 +96,7 @@ export default function GrievancePage() {
           <h2>Escalation</h2>
           <p>
             If you are not satisfied with the resolution, you may write to{" "}
-            <a href="mailto:grievance@learnrift.dev" className="underline">grievance@learnrift.dev</a> with
+            <a href="mailto:grievance@learnrift.site" className="underline">grievance@learnrift.site</a> with
             &ldquo;ESCALATION&rdquo; in the subject line and a copy of the original ticket. We will route the
             matter to a senior team member.
           </p>

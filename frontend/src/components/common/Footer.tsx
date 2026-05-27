@@ -45,24 +45,24 @@ export function Footer() {
               <li className="text-fg-dim">
                 Website:{" "}
                 <a
-                  href="https://learnrift.in"
+                  href="https://learnrift.site"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-fg-dim transition hover:text-fg"
                 >
-                  https://learnrift.in
+                  https://learnrift.site
                 </a>
               </li>
               <li className="text-fg-dim">
                 Support:{" "}
-                <a href="mailto:support@learnrift.in" className="text-fg-dim transition hover:text-fg">
-                  support@learnrift.in
+                <a href="mailto:support@learnrift.site" className="text-fg-dim transition hover:text-fg">
+                  support@learnrift.site
                 </a>
               </li>
               <li className="text-fg-dim">
                 Legal:{" "}
-                <a href="mailto:legal@learnrift.in" className="text-fg-dim transition hover:text-fg">
-                  legal@learnrift.in
+                <a href="mailto:legal@learnrift.site" className="text-fg-dim transition hover:text-fg">
+                  legal@learnrift.site
                 </a>
               </li>
             </ul>

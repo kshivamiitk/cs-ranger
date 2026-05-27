@@ -74,8 +74,8 @@ export default function CreatorTermsPage() {
           <h2>9. Contact</h2>
           <p>
             For creator-related queries, contact{" "}
-            <a href="mailto:support@learnrift.in" className="underline">
-              support@learnrift.in
+            <a href="mailto:support@learnrift.site" className="underline">
+              support@learnrift.site
             </a>
             .
           </p>

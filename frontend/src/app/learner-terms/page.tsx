@@ -58,8 +58,8 @@ export default function LearnerTermsPage() {
           <h2>7. Contact</h2>
           <p>
             For learner support, contact{" "}
-            <a href="mailto:support@learnrift.in" className="underline">
-              support@learnrift.in
+            <a href="mailto:support@learnrift.site" className="underline">
+              support@learnrift.site
             </a>
             .
           </p>

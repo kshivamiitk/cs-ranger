@@ -206,14 +206,14 @@ export default function LandingPage() {
             <div className="mt-4 flex flex-col items-center justify-center gap-1 text-sm text-fg-dim sm:flex-row sm:gap-6">
               <span>
                 Support:{" "}
-                <a href="mailto:support@learnrift.in" className="text-brand hover:underline">
-                  support@learnrift.in
+                <a href="mailto:support@learnrift.site" className="text-brand hover:underline">
+                  support@learnrift.site
                 </a>
               </span>
               <span>
                 Legal:{" "}
-                <a href="mailto:legal@learnrift.in" className="text-brand hover:underline">
-                  legal@learnrift.in
+                <a href="mailto:legal@learnrift.site" className="text-brand hover:underline">
+                  legal@learnrift.site
                 </a>
               </span>
             </div>

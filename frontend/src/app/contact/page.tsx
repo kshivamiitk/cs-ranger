@@ -29,10 +29,10 @@ export default function ContactPage() {
               <h3 className="font-display text-lg font-semibold">For learner support</h3>
             </div>
             <a
-              href="mailto:support@learnrift.in"
+              href="mailto:support@learnrift.site"
               className="mt-3 inline-flex break-all text-sm font-medium text-brand"
             >
-              support@learnrift.in
+              support@learnrift.site
             </a>
           </div>
 
@@ -42,10 +42,10 @@ export default function ContactPage() {
               <h3 className="font-display text-lg font-semibold">For legal, policy, or business queries</h3>
             </div>
             <a
-              href="mailto:legal@learnrift.in"
+              href="mailto:legal@learnrift.site"
               className="mt-3 inline-flex break-all text-sm font-medium text-brand"
             >
-              legal@learnrift.in
+              legal@learnrift.site
             </a>
           </div>
 
@@ -55,12 +55,12 @@ export default function ContactPage() {
               <h3 className="font-display text-lg font-semibold">Website</h3>
             </div>
             <a
-              href="https://learnrift.in"
+              href="https://learnrift.site"
               target="_blank"
               rel="noopener noreferrer"
               className="mt-3 inline-flex break-all text-sm font-medium text-brand"
             >
-              https://learnrift.in
+              https://learnrift.site
             </a>
           </div>
 

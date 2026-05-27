@@ -24,7 +24,7 @@ export async function sendEmail(opts: SendOpts): Promise<{ ok: boolean; id?: str
     console.log(JSON.stringify({ level: "info", msg: "[email:dev]", ...opts }));
     return { ok: true, reason: "DEV_NO_RESEND" };
   }
-  const from = process.env.EMAIL_FROM || "LearnRift <no-reply@learnrift.dev>";
+  const from = process.env.EMAIL_FROM || "LearnRift <no-reply@learnrift.site>";
   const res = await c.emails.send({
     from,
     to: Array.isArray(opts.to) ? opts.to : [opts.to],

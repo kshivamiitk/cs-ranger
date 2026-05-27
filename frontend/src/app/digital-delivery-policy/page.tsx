@@ -40,8 +40,8 @@ export default function DigitalDeliveryPolicyPage() {
 
           <p>
             For access-related issues, contact:{" "}
-            <a href="mailto:support@learnrift.in" className="underline">
-              support@learnrift.in
+            <a href="mailto:support@learnrift.site" className="underline">
+              support@learnrift.site
             </a>
           </p>
         </article>
