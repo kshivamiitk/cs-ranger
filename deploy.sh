@@ -12,16 +12,19 @@ git reset --hard origin/main
 echo "▶ npm install (root cascades to frontend + backend via postinstall)"
 npm install --no-audit --no-fund
 
-echo "▶ build frontend"
-npm --prefix frontend run build
-
-# Backend services run via tsx and do NOT call dotenv.config(); they read env
-# from the process at start time. `pm2 reload` alone reuses the env snapshot
-# from when pm2 first started — .env edits would be silently ignored. Source
-# .env into this shell and pass --update-env so pm2 hands the fresh env to
-# each reloaded worker.
-echo "▶ source .env into deploy shell so pm2 --update-env picks up new values"
+# Source .env BEFORE building the frontend. Next.js inlines NEXT_PUBLIC_* into
+# the client bundle at BUILD time from the process env — if we built first and
+# sourced after, the production bundle would bake in the dev defaults (e.g.
+# NEXT_PUBLIC_API_URL=http://localhost:4000/api) and the live site would call
+# localhost. Sourcing here also feeds the backend:
+# backend services run via tsx and do NOT call dotenv.config(); they read env
+# from the process at start time, and `pm2 reload` alone reuses the env snapshot
+# from when pm2 first started — so .env edits need --update-env on every reload.
+echo "▶ source .env into deploy shell (frontend build bake-in + pm2 --update-env)"
 set -a; source .env; set +a
+
+echo "▶ build frontend (with production NEXT_PUBLIC_* baked in from .env)"
+npm --prefix frontend run build
 
 echo "▶ reload backend services in two waves (avoids Redis client-limit collisions)"
 pm2 reload cs-api-gateway cs-auth-service cs-user-service --update-env

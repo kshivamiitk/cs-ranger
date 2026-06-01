@@ -1,4 +1,4 @@
-import { createService, ok, fail, mock, withDb, isSupabaseConfigured, supabaseAdmin, publish, Topics, sendEmail, emailLayout } from "@cs-ranger/shared";
+import { createService, ok, fail, mock, withDb, isSupabaseConfigured, supabaseAdmin, publish, Topics, sendEmail, emailLayout, requireJwtSecret } from "@cs-ranger/shared";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import jwt, { type SignOptions } from "jsonwebtoken";
@@ -9,7 +9,9 @@ const PORT = Number(process.env.PORT_AUTH || 4001);
 
 const ACCESS_TTL  = process.env.JWT_ACCESS_TTL  || "15m";
 const REFRESH_TTL_DAYS = 30;
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-replace-me";
+// In production this throws if JWT_SECRET is missing/placeholder/short; in dev it
+// returns the shared dev fallback. Must match api-gateway's verification secret.
+const JWT_SECRET = requireJwtSecret();
 const APP_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
 
 // Email verification is OPT-IN — only enforced when EMAIL_VERIFICATION=TRUE in the env.

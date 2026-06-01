@@ -1,3 +1,4 @@
+export * from "./config.js";
 export * from "./utils/response.js";
 export * from "./utils/errors.js";
 export * from "./utils/logger.js";

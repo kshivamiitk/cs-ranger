@@ -2,9 +2,13 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import { attachUser } from "../middleware/auth.js";
 import { makeLogger } from "./logger.js";
 import { AppError } from "./errors.js";
+import { assertProductionEnv } from "../config.js";
 import { createMetricsStore, checkConnectivity } from "../observability.js";
 
 export function createService(name: string): { app: Express; log: ReturnType<typeof makeLogger>; listen: (port: number) => void } {
+  // Fail fast on an unsafe production environment (missing/placeholder JWT secret,
+  // missing Supabase credentials) before the service starts accepting traffic.
+  assertProductionEnv();
   const app = express();
   const log = makeLogger(name);
   const metrics = createMetricsStore();

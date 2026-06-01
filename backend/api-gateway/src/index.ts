@@ -3,7 +3,11 @@ import http from "node:http";
 import cors from "cors";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import jwt from "jsonwebtoken";
-import { makeLogger } from "@cs-ranger/shared";
+import { makeLogger, assertProductionEnv, requireJwtSecret } from "@cs-ranger/shared";
+
+// Fail fast on an unsafe production environment before binding the gateway.
+// (The other services validate via createService; the gateway builds its own app.)
+assertProductionEnv();
 
 const log = makeLogger("api-gateway");
 const app = express();
@@ -26,7 +30,9 @@ const upstreamAgent = new http.Agent({
 process.setMaxListeners(50);
 const PORT = Number(process.env.PORT_GATEWAY || 4000);
 const FRONTEND = process.env.FRONTEND_URL || "http://localhost:3000";
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-replace-me";
+// In production this throws if JWT_SECRET is missing/placeholder/short; in dev it
+// returns the shared dev fallback. Must match auth-service's signing secret.
+const JWT_SECRET = requireJwtSecret();
 
 const SERVICES: Record<string, number> = {
   auth: 4001, users: 4002, courses: 4003, enrollments: 4004,
