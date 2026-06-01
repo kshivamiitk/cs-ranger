@@ -27,7 +27,10 @@ function axiosClient(): AxiosInstance {
   _axios = axios.create({
     baseURL: API_URL,
     headers: { "Content-Type": "application/json" },
-    timeout: 15000,
+    // Publish/save flows make several sequential Supabase round-trips; under high
+    // server↔Supabase latency they can exceed a tight client deadline and surface
+    // as a false "timeout" even though the server completes. 45s absorbs that.
+    timeout: 45000,
   });
 
   _axios.interceptors.request.use((config) => {

@@ -32,6 +32,9 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# DB backups/dumps — contain emails + bcrypt password hashes, never commit
+backups/
+
 # Misc
 *business-setup*
 claude-marjoram-tmux-transcript.txt

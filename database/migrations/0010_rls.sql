@@ -5,14 +5,20 @@
 -- ============================================================
 
 -- Helpers
+-- SECURITY DEFINER + locked search_path is REQUIRED: these run inside RLS
+-- policies (e.g. user_roles' own SELECT policy is "... OR is_admin()"). Without
+-- SECURITY DEFINER, has_role()'s read of user_roles re-enters that policy →
+-- is_admin() → has_role() → … infinite recursion → "stack depth limit exceeded"
+-- (SQLSTATE 54001) on any anon/authenticated read. As definer (owner = table
+-- owner, RLS not forced) the internal read bypasses RLS and the cycle breaks.
 create or replace function has_role(target_role user_role) returns boolean
-language sql stable as $$
-  select exists(select 1 from user_roles where user_id = auth.uid() and role = target_role);
+language sql stable security definer set search_path = public, pg_temp as $$
+  select exists(select 1 from public.user_roles where user_id = auth.uid() and role = target_role);
 $$;
 
 create or replace function is_admin() returns boolean
-language sql stable as $$
-  select has_role('admin');
+language sql stable security definer set search_path = public, pg_temp as $$
+  select public.has_role('admin');
 $$;
 
 -- Make the rest of this file re-runnable. `CREATE POLICY` lacks IF NOT EXISTS
