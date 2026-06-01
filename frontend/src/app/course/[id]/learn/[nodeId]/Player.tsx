@@ -7,7 +7,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { useApp } from "@/app/providers";
 import {
   ArrowLeft, ArrowRight, Bookmark, BookmarkCheck, CheckCircle2, ChevronDown, ChevronRight,
-  FileText, ListChecks, Maximize2, MessageSquare, Minimize2, Paperclip, Play, Sparkles, Loader2,
+  ExternalLink, FileText, ListChecks, Maximize2, MessageSquare, Minimize2, Paperclip, Play, Sparkles, Loader2,
   StickyNote, Timer, X,
 } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
@@ -15,6 +15,7 @@ import { Avatar } from "@/components/common/Avatar";
 import { Progress } from "@/components/common/Progress";
 import { MarkdownView } from "@/components/common/MarkdownView";
 import { SecurePdfViewer } from "@/components/common/SecurePdfViewer";
+import { composeStaticDoc, openStaticLessonInNewTab } from "@/lib/staticLesson";
 import { VideoNode, type VideoController, type VideoProgressSignal } from "./VideoNode";
 import { QuizPanel } from "./QuizPanel";
 import { NotesTab } from "./NotesTab";
@@ -457,8 +458,23 @@ function NodeContent({
     );
   }
   if (node.type === "static_website" && node.static_website) {
-    const html = `<!doctype html><html><head><style>${node.static_website.css || ""}</style></head><body>${node.static_website.html || ""}<script>${node.static_website.js || ""}<\\/script></body></html>`;
-    return <iframe sandbox="allow-scripts" srcDoc={html} className="mt-4 h-[480px] w-full rounded-2xl border border-border bg-white" />;
+    const sw = node.static_website;
+    const html = composeStaticDoc(sw);
+    return (
+      <div className="mt-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-fg-dim">Interactive lesson — open it as a full page for the best experience.</p>
+          <button
+            type="button"
+            onClick={() => openStaticLessonInNewTab(sw, node.title)}
+            className="btn-primary inline-flex items-center gap-1.5 text-sm"
+          >
+            <ExternalLink className="h-4 w-4" /> Open in full page
+          </button>
+        </div>
+        <iframe sandbox="allow-scripts" srcDoc={html} title={node.title} className="h-[560px] w-full rounded-2xl border border-border bg-white" />
+      </div>
+    );
   }
   return <div className="mt-4 card text-center text-fg-dim">Coming soon.</div>;
 }

@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, ListChecks, Play, FileType, Code2, Plus, Trash2, Upload, Loader2, AlertCircle, Paperclip, FileJson, Copy, Check, ChevronDown, ChevronRight } from "lucide-react";
+import { FileText, ListChecks, Play, FileType, Code2, Plus, Trash2, Upload, Loader2, AlertCircle, Paperclip, FileJson, Copy, Check, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { api, type CourseNode, type VideoChapter, type VideoSubtitle } from "@/lib/api";
+import { composeStaticDoc, openStaticLessonInNewTab } from "@/lib/staticLesson";
 import { FileUpload } from "@/components/common/FileUpload";
 import { MarkdownView } from "@/components/common/MarkdownView";
 
@@ -702,32 +703,43 @@ function StaticEditor({ value, onChange }: { value: Partial<CourseNode>; onChang
   function update(field: "html" | "css" | "js", v: string) {
     onChange({ ...value, static_website: { ...sw, [field]: v } });
   }
-  const previewDoc = `<!doctype html><html><head><style>${sw.css}</style></head><body>${sw.html}<script>${sw.js}<\/script></body></html>`;
+  const previewDoc = composeStaticDoc(sw);
   const FILES: Record<"html" | "css" | "js", string> = { html: "index.html", css: "style.css", js: "script.js" };
   return (
     <div className="card space-y-3">
-      <div className="grid gap-3 md:grid-cols-2">
-        {/* VS Code-style editor: file-tab strip + Monaco */}
-        <div className="overflow-hidden rounded-xl border border-border bg-[#1e1e1e]" style={{ height: 380 }}>
-          <div className="flex items-stretch bg-[#252526] text-xs">
-            {(["html", "css", "js"] as const).map((t) => (
-              <button key={t} type="button" onClick={() => setTab(t)}
-                className={`border-r border-black/40 px-3 py-2 font-mono transition ${tab === t ? "bg-[#1e1e1e] text-white" : "text-white/50 hover:text-white/80"}`}>
-                {FILES[t]}
-              </button>
-            ))}
-          </div>
-          <div style={{ height: "calc(100% - 35px)" }}>
-            <Monaco
-              language={tab === "html" ? "html" : tab === "css" ? "css" : "javascript"}
-              theme="vs-dark"
-              value={sw[tab]}
-              onChange={(v) => update(tab, v || "")}
-              options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false }}
-            />
-          </div>
+      {/* VS Code-style editor: file-tab strip + Monaco — full width */}
+      <div className="overflow-hidden rounded-xl border border-border bg-[#1e1e1e]" style={{ height: 440 }}>
+        <div className="flex items-stretch bg-[#252526] text-xs">
+          {(["html", "css", "js"] as const).map((t) => (
+            <button key={t} type="button" onClick={() => setTab(t)}
+              className={`border-r border-black/40 px-3 py-2 font-mono transition ${tab === t ? "bg-[#1e1e1e] text-white" : "text-white/50 hover:text-white/80"}`}>
+              {FILES[t]}
+            </button>
+          ))}
         </div>
-        <iframe sandbox="allow-scripts" srcDoc={previewDoc} className="rounded-xl border border-border bg-white" style={{ height: 380 }} />
+        <div style={{ height: "calc(100% - 35px)" }}>
+          <Monaco
+            language={tab === "html" ? "html" : tab === "css" ? "css" : "javascript"}
+            theme="vs-dark"
+            value={sw[tab]}
+            onChange={(v) => update(tab, v || "")}
+            options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false }}
+          />
+        </div>
+      </div>
+
+      {/* Compact live preview below the editor (not side-by-side) */}
+      <div className="rounded-xl border border-border bg-surface-2 p-2">
+        <div className="mb-2 flex items-center justify-between px-1">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-fg-dim">
+            <span className="h-2 w-2 rounded-full bg-success" /> Live preview
+          </span>
+          <button type="button" onClick={() => openStaticLessonInNewTab(sw, value.title)}
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-fg-dim transition hover:border-brand hover:text-brand">
+            Open full preview <ExternalLink className="h-3 w-3" />
+          </button>
+        </div>
+        <iframe sandbox="allow-scripts" srcDoc={previewDoc} title="Lesson preview" className="w-full rounded-lg border border-border bg-white" style={{ height: 300 }} />
       </div>
     </div>
   );

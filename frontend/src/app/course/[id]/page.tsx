@@ -238,18 +238,34 @@ export default function CourseDetailPage() {
                   <span className="text-brand transition group-open:rotate-45">+</span>
                 </summary>
                 <div className="mt-4 divide-y divide-border">
-                  {(m.nodes || []).map((n) => (
-                    <div key={n.id} className="flex items-center gap-3 py-2.5 text-sm">
-                      <NodeTypeIcon type={n.type} />
-                      <span className="flex-1">{n.title}</span>
-                      {n.is_free_preview ? (
-                        <span className="chip text-success border-success/30">Preview</span>
-                      ) : !isEnrolled ? (
-                        <Lock className="h-3.5 w-3.5 text-fg-dim" />
-                      ) : null}
-                      <span className="text-xs text-fg-dim">{durationFromSeconds(n.duration_seconds || 0)}</span>
-                    </div>
-                  ))}
+                  {(m.nodes || []).map((n) => {
+                    // A lesson is openable if it's a free preview, or the viewer is
+                    // enrolled, or they own the course. Free-preview lessons must be
+                    // clickable for non-enrolled visitors — otherwise the "Preview"
+                    // badge is a dead end.
+                    const canOpen = n.is_free_preview || isEnrolled || isOwner;
+                    const inner = (
+                      <>
+                        <NodeTypeIcon type={n.type} />
+                        <span className="flex-1">{n.title}</span>
+                        {n.is_free_preview ? (
+                          <span className="chip text-success border-success/30">Preview</span>
+                        ) : !isEnrolled ? (
+                          <Lock className="h-3.5 w-3.5 text-fg-dim" />
+                        ) : null}
+                        <span className="text-xs text-fg-dim">{durationFromSeconds(n.duration_seconds || 0)}</span>
+                      </>
+                    );
+                    return canOpen ? (
+                      <Link key={n.id} href={`/course/${course.id}/learn/${n.id}`} className="flex items-center gap-3 py-2.5 text-sm transition hover:text-brand">
+                        {inner}
+                      </Link>
+                    ) : (
+                      <div key={n.id} className="flex items-center gap-3 py-2.5 text-sm">
+                        {inner}
+                      </div>
+                    );
+                  })}
                 </div>
               </details>
             ))}
