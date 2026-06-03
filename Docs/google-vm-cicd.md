@@ -140,6 +140,10 @@ The app is intentionally stopped before install/build because this is a cheap
 single-VM deployment. That short downtime is safer than building Next.js while
 all backend services are already using RAM.
 
+On the 2 GB VM, `next start` can take around 90-120 seconds to become ready
+after a fresh build. `deploy.sh` waits up to 180 seconds before failing the
+frontend health check.
+
 ## Manual Recovery
 
 If the site returns 502:
