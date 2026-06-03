@@ -22,6 +22,19 @@ sudo apt install -y nodejs
 sudo npm install -g pm2
 ```
 
+On a 2 GB VM, add swap before the first build. This avoids short memory spikes
+during `npm ci` and `next build` taking the site down:
+
+```bash
+if ! swapon --show | grep -q /swapfile; then
+  sudo fallocate -l 2G /swapfile
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile
+  sudo swapon /swapfile
+  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+fi
+```
+
 Clone the repo:
 
 ```bash
@@ -115,13 +128,17 @@ On every push to `main`, GitHub Actions:
 
 `deploy.sh` then:
 
-1. Installs dependencies from lockfiles on the VM.
-2. Sources `.env` before the frontend build.
-3. Builds the frontend.
-4. Removes stale PM2 entries for this app.
+1. Removes stale PM2 entries for this app.
+2. Installs dependencies from lockfiles on the VM.
+3. Sources `.env` before the frontend build.
+4. Builds the frontend.
 5. Starts the canonical `ecosystem.config.cjs`.
 6. Health-checks frontend and gateway/services.
 7. Saves the clean PM2 process list.
+
+The app is intentionally stopped before install/build because this is a cheap
+single-VM deployment. That short downtime is safer than building Next.js while
+all backend services are already using RAM.
 
 ## Manual Recovery
 
@@ -150,3 +167,16 @@ sudo mkswap /swapfile
 sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
+
+## When to Upgrade
+
+Do this order:
+
+1. Keep one VM, add PM2 startup, add swap, and make deploys clean.
+2. If memory still stays high or Node processes restart often, resize from
+   `e2-small` to `e2-medium`.
+3. Only add a load balancer, managed instance group, and autoscaling after the
+   app is stable on one VM and traffic justifies the extra cost.
+
+Autoscaling does not fix a process that crashes on one VM; it only creates more
+VMs with the same crash unless the single-instance deployment is stable first.

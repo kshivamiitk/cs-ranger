@@ -66,6 +66,19 @@ node -v
 npm -v
 pm2 -v
 
+# This is a one-VM deployment. Stop the app before install/build so a small
+# e2-small/e2-medium instance does not build Next.js while all services are
+# already consuming RAM. This intentionally causes short deploy downtime.
+log "stop existing pm2 entries for this app"
+for app in "${APP_NAMES[@]}"; do
+  pm2 delete "$app" >/dev/null 2>&1 || true
+done
+
+if command -v free >/dev/null 2>&1; then
+  log "memory before install/build"
+  free -h
+fi
+
 log "install dependencies from lockfiles"
 npm ci --ignore-scripts --no-audit --no-fund --registry="$NPM_REGISTRY"
 npm --prefix frontend ci --no-audit --no-fund --registry="$NPM_REGISTRY"
@@ -92,11 +105,6 @@ fi
 log "build frontend"
 rm -rf frontend/.next
 npm --prefix frontend run build
-
-log "remove stale pm2 entries for this app"
-for app in "${APP_NAMES[@]}"; do
-  pm2 delete "$app" >/dev/null 2>&1 || true
-done
 
 log "start pm2 ecosystem"
 pm2 start ecosystem.config.cjs --update-env
