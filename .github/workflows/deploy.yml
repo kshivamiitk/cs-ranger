@@ -1,59 +1,103 @@
 name: Deploy
 
-# Triggers:
-#   - push to main: automatic deploy
-#   - workflow_dispatch: manual deploy from the Actions tab (useful for re-runs)
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-# Never run two deploys at once. If a new push lands mid-deploy, queue it.
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+
 concurrency:
-  group: deploy-prod
+  group: deploy-production
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy to EC2
+  verify:
+    name: Verify before deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Sanity-check secrets
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci --no-audit --no-fund
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit root production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Audit frontend production dependencies
+        run: npm --prefix frontend audit --omit=dev --audit-level=high
+
+      - name: Audit backend production dependencies
+        run: npm --prefix backend audit --omit=dev --audit-level=high
+
+  deploy:
+    name: Deploy to Google Compute Engine
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Sanity-check deployment secrets
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          # Don't print values; just confirm they exist and are non-empty.
           [ -n "$DEPLOY_SSH_KEY" ] || { echo "::error::DEPLOY_SSH_KEY is missing"; exit 1; }
           [ -n "$DEPLOY_HOST" ] || { echo "::error::DEPLOY_HOST is missing"; exit 1; }
           [ -n "$DEPLOY_USER" ] || { echo "::error::DEPLOY_USER is missing"; exit 1; }
-          echo "✓ DEPLOY_SSH_KEY length: ${#DEPLOY_SSH_KEY}"
-          echo "✓ DEPLOY_HOST length:    ${#DEPLOY_HOST}"
-          echo "✓ DEPLOY_USER:           $DEPLOY_USER"
+          echo "Deployment secrets are present."
 
       - name: Set up SSH key
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          # Sanity-check the key parsed as a valid OpenSSH key.
-          ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null && echo "✓ private key is valid"
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null
 
-      - name: Run deploy.sh on EC2
+      - name: Deploy exact commit on VM
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_REF: ${{ github.sha }}
         run: |
-          # StrictHostKeyChecking=accept-new skips the manual ssh-keyscan dance
-          # (which can fail silently if port 22 is blocked from runner IPs).
-          # Ensure the server has the latest deploy.sh before invoking it.
           ssh -i ~/.ssh/id_ed25519 \
               -o StrictHostKeyChecking=accept-new \
               -o ConnectTimeout=20 \
               -o ServerAliveInterval=30 \
               "$DEPLOY_USER@$DEPLOY_HOST" \
-              "set -e; cd /home/ubuntu/cs-ranger && git fetch --quiet origin main && git reset --hard origin/main && chmod +x deploy.sh && bash deploy.sh"
+              "DEPLOY_BRANCH=main DEPLOY_REF='$DEPLOY_REF' bash -lc 'cd \"\$HOME/cs-ranger\" && git fetch --quiet origin main && git reset --hard \"\$DEPLOY_REF\" && chmod +x deploy.sh && ./deploy.sh'"

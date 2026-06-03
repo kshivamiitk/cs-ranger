@@ -1,51 +1,164 @@
 #!/usr/bin/env bash
-# Idempotent deploy: git pull -> install -> build frontend -> reload pm2 -> health check.
-# Designed to be called from GitHub Actions over SSH; also safe to run manually.
+# Idempotent production deploy for the single-VM Google Cloud setup.
+#
+# Expected server layout:
+#   repo:  $HOME/cs-ranger
+#   env:   $HOME/cs-ranger/.env
+#   pm2:   installed globally, with startup service configured once
+#
+# GitHub Actions calls this over SSH after checking out the target commit on the
+# VM. It is also safe to run manually on the VM.
 set -euo pipefail
 
-cd /home/ubuntu/cs-ranger
+APP_DIR="${APP_DIR:-$HOME/cs-ranger}"
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+DEPLOY_REF="${DEPLOY_REF:-origin/$DEPLOY_BRANCH}"
+NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmjs.org}"
 
-echo "▶ git fetch + reset (discards any drift on the server)"
-git fetch --quiet origin main
-git reset --hard origin/main
+APP_NAMES=(
+  cs-frontend
+  cs-api-gateway
+  cs-auth-service
+  cs-user-service
+  cs-course-service
+  cs-enrollment-service
+  cs-search-service
+  cs-payment-service
+  cs-wallet-service
+  cs-payout-service
+  cs-notification-service
+  cs-support-service
+  cs-achievement-service
+  cs-analytics-service
+)
 
-echo "▶ npm install (root cascades to frontend + backend via postinstall)"
-npm install --no-audit --no-fund
+log() {
+  printf '\n==> %s\n' "$*"
+}
 
-# Source .env BEFORE building the frontend. Next.js inlines NEXT_PUBLIC_* into
-# the client bundle at BUILD time from the process env — if we built first and
-# sourced after, the production bundle would bake in the dev defaults (e.g.
-# NEXT_PUBLIC_API_URL=http://localhost:4000/api) and the live site would call
-# localhost. Sourcing here also feeds the backend:
-# backend services run via tsx and do NOT call dotenv.config(); they read env
-# from the process at start time, and `pm2 reload` alone reuses the env snapshot
-# from when pm2 first started — so .env edits need --update-env on every reload.
-echo "▶ source .env into deploy shell (frontend build bake-in + pm2 --update-env)"
-set -a; source .env; set +a
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Missing required command: $1" >&2
+    exit 1
+  }
+}
 
-echo "▶ build frontend (with production NEXT_PUBLIC_* baked in from .env)"
-npm --prefix frontend run build
+log "preflight"
+require_cmd git
+require_cmd node
+require_cmd npm
+require_cmd pm2
+require_cmd curl
 
-echo "▶ reload backend services in two waves (avoids Redis client-limit collisions)"
-pm2 reload cs-api-gateway cs-auth-service cs-user-service --update-env
-sleep 3
-pm2 reload cs-course-service cs-enrollment-service cs-search-service \
-           cs-payment-service cs-wallet-service cs-payout-service \
-           cs-notification-service cs-support-service \
-           cs-achievement-service cs-analytics-service --update-env
+cd "$APP_DIR"
 
-echo "▶ reload frontend"
-pm2 reload cs-frontend --update-env
-
-echo "▶ wait for services to settle"
-sleep 6
-
-echo "▶ health check"
-HEALTH=$(curl -fsS http://127.0.0.1:4000/health || echo "FAIL")
-echo "$HEALTH" | head -c 500
-echo
-if [[ "$HEALTH" == "FAIL" ]] || ! echo "$HEALTH" | grep -q '"gateway":"ok"'; then
-  echo "✗ deploy failed health check"
+if [[ ! -f .env ]]; then
+  echo "Missing $APP_DIR/.env. Create it from .env.example before deploying." >&2
   exit 1
 fi
-echo "✓ deploy OK"
+
+log "fetch target ref"
+git fetch --quiet origin "$DEPLOY_BRANCH"
+git reset --hard "$DEPLOY_REF"
+
+log "runtime versions"
+node -v
+npm -v
+pm2 -v
+
+log "install dependencies from lockfiles"
+npm ci --ignore-scripts --no-audit --no-fund --registry="$NPM_REGISTRY"
+npm --prefix frontend ci --no-audit --no-fund --registry="$NPM_REGISTRY"
+npm --prefix backend ci --no-audit --no-fund --registry="$NPM_REGISTRY"
+
+# Source .env BEFORE building the frontend. Next.js inlines NEXT_PUBLIC_* at
+# build time. Backend services also read env from the PM2 process environment.
+log "load production env"
+set -a
+source .env
+set +a
+
+if [[ "${NODE_ENV:-}" != "production" ]]; then
+  echo "Refusing to deploy: NODE_ENV must be production in $APP_DIR/.env" >&2
+  exit 1
+fi
+
+if [[ "${NEXT_PUBLIC_API_URL:-}" =~ localhost|127\.0\.0\.1|0\.0\.0\.0 ]]; then
+  echo "Refusing to deploy: NEXT_PUBLIC_API_URL points at localhost." >&2
+  echo "Set NEXT_PUBLIC_API_URL=/api or your public API URL." >&2
+  exit 1
+fi
+
+log "build frontend"
+rm -rf frontend/.next
+npm --prefix frontend run build
+
+log "remove stale pm2 entries for this app"
+for app in "${APP_NAMES[@]}"; do
+  pm2 delete "$app" >/dev/null 2>&1 || true
+done
+
+log "start pm2 ecosystem"
+pm2 start ecosystem.config.cjs --update-env
+
+log "wait for frontend"
+FRONTEND_OK=0
+for _ in $(seq 1 30); do
+  if curl -fsS -o /dev/null http://127.0.0.1:3000; then
+    FRONTEND_OK=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$FRONTEND_OK" != "1" ]]; then
+  echo "Frontend did not become healthy on http://127.0.0.1:3000" >&2
+  pm2 status || true
+  pm2 logs cs-frontend --lines 80 --nostream || true
+  exit 1
+fi
+
+log "wait for api gateway and services"
+HEALTH_OK=0
+HEALTH=""
+for _ in $(seq 1 30); do
+  if HEALTH="$(curl -fsS http://127.0.0.1:4000/health 2>/dev/null)"; then
+    if node -e '
+      const payload = JSON.parse(process.argv[1]);
+      const data = payload.data || {};
+      const bad = (data.services || []).filter((service) => service.status !== "ok");
+      if (data.gateway !== "ok" || bad.length) {
+        if (bad.length) console.error("Unhealthy services:", bad.map((s) => `${s.name}:${s.status}`).join(", "));
+        process.exit(1);
+      }
+    ' "$HEALTH"; then
+      HEALTH_OK=1
+      break
+    fi
+  fi
+  sleep 2
+done
+
+if [[ "$HEALTH_OK" != "1" ]]; then
+  echo "API gateway health check failed." >&2
+  [[ -n "$HEALTH" ]] && echo "$HEALTH" >&2
+  pm2 status || true
+  pm2 logs cs-api-gateway --lines 80 --nostream || true
+  exit 1
+fi
+
+echo "$HEALTH" | head -c 1000
+echo
+
+log "save clean pm2 process list"
+pm2 save
+
+if command -v systemctl >/dev/null 2>&1; then
+  if ! systemctl is-enabled --quiet "pm2-$USER" 2>/dev/null; then
+    echo "Warning: pm2-$USER startup service is not enabled." >&2
+    echo "Run once on the VM:" >&2
+    echo "  sudo env PATH=\$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u $USER --hp $HOME" >&2
+    echo "  pm2 save" >&2
+  fi
+fi
+
+log "deploy complete"
