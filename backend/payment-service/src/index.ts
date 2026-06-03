@@ -1,5 +1,6 @@
 import { createService, ok, fail, mock, requireAuth, requireRole, withDb, isSupabaseConfigured, razorpay, isRazorpayConfigured, verifyWebhookSignature, verifyPaymentSignature, publish, Topics, getPlatformSetting, writeAuditLog } from "@cs-ranger/shared";
 import { z } from "zod";
+import { chargeableAmountPaise, decideWebhookAction, pickCapturablePayment, type PaymentStatus } from "./logic.js";
 
 const { app, listen, log } = createService("payment-service");
 const PORT = Number(process.env.PORT_PAYMENT || 4006);
@@ -37,13 +38,25 @@ app.post("/create-order", requireAuth, async (req, res) => {
   }, null);
   if (existing) return fail(res, 409, "Already enrolled", "ALREADY_ENROLLED");
 
+  // Charge amount (paise). chargeableAmountPaise encodes the discount rules:
+  // discounted_price applies only when positive AND strictly below price, so a
+  // 0/NULL discount can't charge ₹0 through the paid path. Returns null for a
+  // free course — already guarded above, but we re-check defensively.
+  // Computed BEFORE the dedupe lookup so we can refuse to reuse a pending order
+  // priced at a now-stale amount (creator changed the price after it was opened).
+  const charge = chargeableAmountPaise(course);
+  if (!charge) return fail(res, 400, "Course is free — use enrollment endpoint", "FREE_COURSE");
+  const amountPaise = charge.amountPaise;
+
   // 2b. Dedupe pending orders. If the user clicked Buy multiple times we
   // already have a pending Razorpay order open for this (learner, course)
   // pair — reuse it. Otherwise the creator could end up double-credited
   // when two of those orders happened to both go through later (different
   // cards, retry-and-original both captured at Razorpay, etc).
   // Cutoff matches Razorpay's order TTL (~1 hour) so we don't hand back
-  // an order Razorpay has already expired.
+  // an order Razorpay has already expired. The amount filter ensures a price
+  // change invalidates the old order — we mint a fresh one at the new price
+  // rather than charging the buyer the previous amount.
   const reusable = await withDb(async (db) => {
     const cutoff = new Date(Date.now() - 60 * 60_000).toISOString();
     const { data } = await db.from("razorpay_orders")
@@ -51,6 +64,7 @@ app.post("/create-order", requireAuth, async (req, res) => {
       .eq("learner_id", req.user!.id)
       .eq("course_id", courseId)
       .eq("status", "pending")
+      .eq("amount", amountPaise)
       .gte("created_at", cutoff)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -67,15 +81,6 @@ app.post("/create-order", requireAuth, async (req, res) => {
       reused: true,
     });
   }
-
-  // discounted_price can be NULL (no promo) or 0 (legitimate "no discount").
-  // The earlier `?? course.price` would treat 0 as a valid discount and charge ₹0
-  // through the paid path. Only use the discount when it's positive AND below price.
-  const useDiscount = typeof course.discounted_price === "number"
-    && course.discounted_price > 0
-    && course.discounted_price < course.price;
-  const amount = useDiscount ? (course.discounted_price as number) : course.price;
-  const amountPaise = amount * 100;
 
   // 3. Create Razorpay order (or stub in dev)
   let orderId: string;
@@ -184,6 +189,117 @@ app.post("/verify", requireAuth, async (req, res) => {
   });
 });
 
+// ─── Reconciliation / self-heal ──────────────────────────────────
+// The "paid but no access" failure happens when BOTH the client /verify and
+// the webhook are lost (verify timed out at the browser, webhook unreachable
+// or its secret misconfigured). Razorpay still captured the money. This path
+// treats the gateway as the source of truth: look up what Razorpay actually
+// captured for the order and, if it's settled, run the same idempotent
+// verify_payment the webhook would have. Safe to call any number of times.
+type ReconcileOutcome =
+  | { status: "success"; transitioned: boolean; courseId?: string }
+  | { status: "refunded" }
+  | { status: "pending"; reconciled: boolean; reason?: string }
+  | { status: "not_found" }
+  | { status: "forbidden" }
+  | { status: "gateway_error" };
+
+async function reconcileOrder(orderId: string, expectedLearnerId: string | null): Promise<ReconcileOutcome> {
+  const payment = await withDb(async (db) => {
+    const { data } = await db.from("payments")
+      .select("id, learner_id, course_id, status, razorpay_payment_id")
+      .eq("razorpay_order_id", orderId).maybeSingle();
+    return data as { id: string; learner_id: string; course_id: string; status: PaymentStatus; razorpay_payment_id: string | null } | null;
+  }, null);
+  if (!payment) return { status: "not_found" };
+  // Ownership — a learner may only reconcile their own order. The admin bulk
+  // sweeper passes null to skip this.
+  if (expectedLearnerId && payment.learner_id !== expectedLearnerId) return { status: "forbidden" };
+
+  if (payment.status === "success") return { status: "success", transitioned: false, courseId: payment.course_id };
+  if (payment.status === "refunded") return { status: "refunded" };
+
+  // Without a configured gateway (local dev) there's nothing to reconcile against.
+  if (!isRazorpayConfigured()) return { status: "pending", reconciled: false, reason: "gateway_offline" };
+
+  let captured: { id: string; status: string } | null;
+  try {
+    const resp = await razorpay().orders.fetchPayments(orderId) as { items?: { id: string; status: string }[] };
+    captured = pickCapturablePayment(resp?.items);
+  } catch (e) {
+    log.error("reconcile fetchPayments failed", { orderId, err: e instanceof Error ? e.message : String(e) });
+    return { status: "gateway_error" };
+  }
+  if (!captured) return { status: "pending", reconciled: true, reason: "uncaptured" };
+
+  // Captured at Razorpay but not settled locally → run the same atomic path the
+  // webhook uses. verify_payment is idempotent; only publish on a real transition.
+  const result = await withDb(async (db) => {
+    const { data, error } = await db.rpc("verify_payment", {
+      p_order_id: orderId,
+      p_payment_id: captured!.id,
+      p_webhook_event_id: null,
+      p_commission_rate: await commissionRate(),
+    });
+    if (error) throw error;
+    return Array.isArray(data) ? data[0] : data;
+  }, null);
+  if (result?.transitioned) {
+    await publish(Topics.PAYMENT_VERIFIED, {
+      paymentId: result.payment_id, courseId: result.course_id, learnerId: result.learner_id, amount: result.amount_paise,
+    });
+  }
+  return { status: "success", transitioned: !!result?.transitioned, courseId: payment.course_id };
+}
+
+// Learner-triggered recovery. The checkout calls this when /verify fails after
+// the money was already taken, and the course page can call it as a last resort
+// before telling the user they aren't enrolled.
+const ReconcileSchema = z.object({ orderId: z.string() });
+app.post("/reconcile", requireAuth, async (req, res) => {
+  const parsed = ReconcileSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message, "VALIDATION");
+
+  const outcome = await reconcileOrder(parsed.data.orderId, req.user!.id);
+  switch (outcome.status) {
+    case "not_found": return fail(res, 404, "Payment not found", "NOT_FOUND");
+    case "forbidden": return fail(res, 403, "Not your payment", "FORBIDDEN");
+    case "gateway_error": return fail(res, 502, "Payment gateway error", "GATEWAY_ERROR");
+    case "success": return ok(res, { enrolled: true, status: "success", courseId: outcome.courseId, idempotent: !outcome.transitioned });
+    case "refunded": return ok(res, { enrolled: false, status: "refunded" });
+    case "pending": return ok(res, { enrolled: false, status: "pending", reconciled: outcome.reconciled, reason: outcome.reason });
+  }
+});
+
+// Admin bulk recovery. Reconciles every still-pending order against Razorpay —
+// the operational tool for sweeping up any payment that slipped through (and
+// the way to rescue payments before expire_pending_orders flips them to failed).
+app.post("/reconcile-pending", requireRole("admin"), async (req, res) => {
+  const minutes = Math.max(0, Math.min(1440, Number((req.body as { minutesOld?: number })?.minutesOld ?? 0)));
+  const orders = await withDb(async (db) => {
+    let q = db.from("payments").select("razorpay_order_id").eq("status", "pending");
+    if (minutes > 0) q = q.lt("created_at", new Date(Date.now() - minutes * 60_000).toISOString());
+    const { data } = await q.limit(500);
+    return (data || []) as { razorpay_order_id: string }[];
+  }, () => []);
+
+  let recovered = 0, stillPending = 0, errored = 0;
+  for (const o of orders) {
+    if (!o.razorpay_order_id) continue;
+    const outcome = await reconcileOrder(o.razorpay_order_id, null);
+    if (outcome.status === "success" && outcome.transitioned) recovered++;
+    else if (outcome.status === "gateway_error") errored++;
+    else if (outcome.status === "pending") stillPending++;
+  }
+  if (recovered > 0) {
+    await writeAuditLog({
+      adminId: req.user!.id, action: "payment.reconcile_pending", targetType: "payment", targetId: "bulk",
+      metadata: { scanned: orders.length, recovered, stillPending, errored, minutesOld: minutes },
+    });
+  }
+  ok(res, { scanned: orders.length, recovered, stillPending, errored });
+});
+
 // ─── Razorpay webhook (server-to-server confirmation) ────────────
 // Razorpay HMAC-signs the raw bytes of the request body. The global
 // express.json() middleware in createService captures those bytes via its
@@ -228,14 +344,13 @@ app.post("/webhook", async (req, res) => {
     return ok(res, { received: true, unknown: true });
   }
 
-  // Refuse to walk a payment backwards (e.g. an out-of-order webhook trying
-  // to flip 'refunded' back to 'success'). Terminal states are final.
-  if ((orderRow as { status: string }).status === "refunded") {
-    log.warn("ignoring webhook for refunded order", { order_id: payment.order_id, event });
-    return ok(res, { received: true, ignored: "already_refunded" });
-  }
+  // Decide from event + current local status. Pure decision (logic.ts) so the
+  // "never walk a payment backwards" and "captured == authorized == money is
+  // ours" rules are unit-tested. refunded/terminal states resolve to ignore.
+  const status = (orderRow as { status: PaymentStatus }).status;
+  const action = decideWebhookAction(event, status);
 
-  if (event === "payment.captured" || event === "payment.authorized") {
+  if (action.kind === "verify") {
     const result = await withDb(async (db) => {
       const { data, error } = await db.rpc("verify_payment", {
         p_order_id: payment.order_id,
@@ -251,7 +366,7 @@ app.post("/webhook", async (req, res) => {
         paymentId: result.payment_id, courseId: result.course_id, learnerId: result.learner_id, amount: result.amount_paise,
       });
     }
-  } else if (event === "payment.failed") {
+  } else if (action.kind === "mark_failed") {
     // .eq("status", "pending") so an out-of-order webhook can't flip a
     // captured payment back to failed. Pre-existing terminal state is sticky.
     const result = await withDb(async (db) => {
@@ -275,6 +390,9 @@ app.post("/webhook", async (req, res) => {
         return null;
       }, null);
     }
+  } else if (action.reason === "already_refunded") {
+    log.warn("ignoring webhook for refunded order", { order_id: payment.order_id, event });
+    return ok(res, { received: true, ignored: "already_refunded" });
   }
 
   ok(res, { received: true });

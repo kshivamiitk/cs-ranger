@@ -375,6 +375,10 @@ export const api = {
     createOrder: (courseId: string) => unwrap<{ orderId: string; keyId: string; amount: number; currency: string; courseTitle?: string }>(axiosClient().post("/payments/create-order", { courseId })),
     verify: (b: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) =>
       unwrap<{ verified: boolean; courseId: string }>(axiosClient().post("/payments/verify", b)),
+    // Self-heal: ask the server to reconcile the order against Razorpay when a
+    // verify call was lost (timed out / network). Returns whether we're enrolled.
+    reconcile: (orderId: string) =>
+      unwrap<{ enrolled: boolean; status: string; courseId?: string }>(axiosClient().post("/payments/reconcile", { orderId })),
     list: () => unwrap<Payment[]>(axiosClient().get("/payments/")),
     refund: (paymentId: string) => unwrap<{ refunded: boolean }>(axiosClient().post(`/payments/${paymentId}/refund`, {})),
     transactions: (kind?: "course" | "storage") =>

@@ -17,6 +17,35 @@ interface RazorpayOptions {
   modal?: { ondismiss?: () => void };
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+type VerifyResponse = { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string };
+
+// The money is ALREADY captured by the time Razorpay invokes our handler, so a
+// single failed /verify must never strand the learner without access. We retry
+// /verify a few times (it can time out under high server↔DB latency even though
+// it succeeded), then fall back to server-side reconciliation, which asks
+// Razorpay directly and grants access if the payment really was captured.
+async function verifyWithRecovery(response: VerifyResponse): Promise<string> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const v = await api.payments.verify(response);
+      if (v.verified) return v.courseId;
+      lastErr = new Error("Payment verification failed");
+    } catch (e) {
+      lastErr = e;
+    }
+    await sleep(800 * (attempt + 1));
+  }
+  // /verify kept failing — reconcile against the gateway (source of truth).
+  try {
+    const r = await api.payments.reconcile(response.razorpay_order_id);
+    if (r.enrolled) return r.courseId || "";
+  } catch { /* fall through to the original error */ }
+  throw lastErr instanceof Error ? lastErr : new Error("Verification failed");
+}
+
 let scriptLoaded = false;
 function loadScript(): Promise<boolean> {
   if (scriptLoaded) return Promise.resolve(true);
@@ -57,14 +86,12 @@ export function useRazorpayCheckout(opts: { onSuccess?: (courseId: string) => vo
         modal: { ondismiss: () => setBusy(false) },
         handler: async (response) => {
           try {
-            const v = await api.payments.verify(response);
-            if (v.verified) {
-              opts.onSuccess?.(v.courseId);
-            } else {
-              setError("Payment verification failed");
-              opts.onError?.("Payment verification failed");
-            }
+            const courseId = await verifyWithRecovery(response);
+            opts.onSuccess?.(courseId);
           } catch (e) {
+            // Money was taken but we still couldn't confirm access. Surface a
+            // recovery-aware message — the webhook + reconciler will keep trying
+            // server-side, so access usually appears shortly after a refresh.
             const msg = e instanceof Error ? e.message : "Verification failed";
             setError(msg);
             opts.onError?.(msg);

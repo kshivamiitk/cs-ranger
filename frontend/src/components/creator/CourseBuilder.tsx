@@ -5,9 +5,17 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, BookOpen, ChevronDown, ChevronRight, Code2, FileText, FileType,
-  Folder, FolderOpen, Globe, ListChecks, Loader2, Lock, Play, Plus, Save, Search, Trash2,
+  Folder, FolderOpen, Globe, GripVertical, ListChecks, Loader2, Lock, Play, Plus, Save, Search, Trash2,
   Users, UserPlus, AlertCircle, Check,
 } from "lucide-react";
+import {
+  DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy, arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { Avatar } from "@/components/common/Avatar";
@@ -28,8 +36,12 @@ interface DraftCourse {
   price: number; discounted_price?: number;
   certificate_enabled: boolean;
 }
-interface DraftNode extends Partial<CourseNode> { _local?: boolean }
+interface DraftNode extends Partial<CourseNode> { _local?: boolean; _localId: string }
 interface DraftModule { id?: string; _localId: string; title: string; nodes: DraftNode[] }
+
+// Stable client id for drag identity (and to follow selection across reorders).
+// New rows have no server id yet, so we can't key drag state off `id`.
+const localId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 
 type Selection =
   | { kind: "course" }
@@ -112,6 +124,13 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
 
   const { data: categories } = useQuery({ queryKey: ["categories"], queryFn: () => api.courses.categories(), staleTime: 60 * 60_000 });
 
+  // Drag-to-reorder. PointerSensor has a small activation distance so a plain
+  // click on a row still selects it (only a deliberate drag starts a move).
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
   // Edit mode: load the existing course (full content) and hydrate state once.
   const { data: existing, isLoading: loadingExisting } = useQuery({
     queryKey: ["course-content", courseId],
@@ -131,8 +150,8 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
     });
     setStatus((existing.status as typeof status) || "draft");
     const loaded: DraftModule[] = (existing.modules || []).map((m) => ({
-      id: m.id, _localId: m.id || `m-${Math.random().toString(36).slice(2)}`, title: m.title,
-      nodes: (m.nodes || []).map((n) => ({ ...n })) as DraftNode[],
+      id: m.id, _localId: m.id || localId("m"), title: m.title,
+      nodes: (m.nodes || []).map((n) => ({ ...n, _localId: n.id || localId("n") })) as DraftNode[],
     }));
     setModules(loaded);
     const exp: Record<string, boolean> = {};
@@ -278,7 +297,7 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
     const m = modules[mi];
     const idx = m.nodes.length;
     const next = [...modules];
-    next[mi] = { ...m, nodes: [...m.nodes, { type, title: `Lesson ${idx + 1}`, _local: true }] };
+    next[mi] = { ...m, nodes: [...m.nodes, { type, title: `Lesson ${idx + 1}`, _local: true, _localId: localId("n") }] };
     setModules(next);
     setExpanded((e) => ({ ...e, [moduleLocalId]: true }));
     setSelected({ kind: "lesson", moduleLocalId, nodeIndex: idx });
@@ -313,11 +332,55 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
   function updateModuleTitle(localId: string, title: string) {
     setModules(modules.map((m) => (m._localId === localId ? { ...m, title } : m)));
   }
-  function updateLesson(moduleLocalId: string, nodeIndex: number, next: DraftNode) {
+  function updateLesson(moduleLocalId: string, nodeIndex: number, next: Partial<CourseNode>) {
     const mi = modules.findIndex((m) => m._localId === moduleLocalId);
     if (mi < 0) return;
-    const ms = [...modules]; const ns = [...ms[mi].nodes]; ns[nodeIndex] = next; ms[mi] = { ...ms[mi], nodes: ns };
+    // Merge onto the existing node so the stable _localId (drag identity) is kept
+    // even though the editor only emits the editable CourseNode fields.
+    const ms = [...modules]; const ns = [...ms[mi].nodes]; ns[nodeIndex] = { ...ns[nodeIndex], ...next }; ms[mi] = { ...ms[mi], nodes: ns };
     setModules(ms);
+  }
+
+  // ── Drag reorder ──
+  // Reorder is local state; the new positions are persisted by index on the
+  // next Save (saveAll writes position = array index). Selection is followed by
+  // _localId so the open module/lesson stays selected after a move.
+  function onModuleDragEnd(e: DragEndEvent) {
+    if (!guardEdit()) return;
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const from = modules.findIndex((m) => m._localId === active.id);
+    const to = modules.findIndex((m) => m._localId === over.id);
+    if (from < 0 || to < 0) return;
+    setModules((ms) => arrayMove(ms, from, to));
+  }
+
+  function onLessonDragEnd(moduleLocalId: string, e: DragEndEvent) {
+    if (!guardEdit()) return;
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const mi = modules.findIndex((m) => m._localId === moduleLocalId);
+    if (mi < 0) return;
+    const nodes = modules[mi].nodes;
+    const from = nodes.findIndex((n) => n._localId === active.id);
+    const to = nodes.findIndex((n) => n._localId === over.id);
+    if (from < 0 || to < 0) return;
+
+    // Remember the selected lesson's stable id so we can follow it to its new index.
+    const selectedLocalId =
+      selected.kind === "lesson" && selected.moduleLocalId === moduleLocalId
+        ? nodes[selected.nodeIndex]?._localId
+        : null;
+
+    const reordered = arrayMove(nodes, from, to);
+    const next = [...modules];
+    next[mi] = { ...modules[mi], nodes: reordered };
+    setModules(next);
+
+    if (selectedLocalId) {
+      const newIndex = reordered.findIndex((n) => n._localId === selectedLocalId);
+      if (newIndex >= 0) setSelected({ kind: "lesson", moduleLocalId, nodeIndex: newIndex });
+    }
   }
 
   // Persist the whole draft. Idempotent: existing rows are updated (not re-created),
@@ -350,7 +413,8 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
         const body = nodeBody(n, `Lesson ${ni + 1}`);
         if (!n.id) {
           const created = await api.courses.addNode({ moduleId: mId!, ...body });
-          nextNodes.push({ ...created });
+          // Keep the node's stable _localId so drag identity + selection survive the save.
+          nextNodes.push({ ...created, _localId: n._localId });
         } else {
           await api.courses.updateNode(n.id, { ...body, position: ni });
           nextNodes.push({ ...n, ...body });
@@ -506,40 +570,54 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
                 icon={<BookOpen className="h-4 w-4 text-brand" />}
                 label={course.title || "Untitled course"}
               />
-              {/* Modules */}
+              {/* Modules — drag the grip to reorder. Order is saved on Save. */}
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onModuleDragEnd}>
+              <SortableContext items={modules.map((m) => m._localId)} strategy={verticalListSortingStrategy}>
               {modules.map((m) => {
                 const isOpen = !!expanded[m._localId];
                 const moduleSelected = selected.kind === "module" && selected.localId === m._localId;
                 const adderOpen = adderOpenFor === m._localId;
                 return (
                   <div key={m._localId}>
-                    <ExplorerRow
-                      indent={1}
-                      selected={moduleSelected}
-                      onClick={() => selectModule(m._localId)}
-                      onChevronClick={() => toggleExpand(m._localId)}
-                      chevron={isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                      icon={isOpen ? <FolderOpen className="h-4 w-4 text-amber-400" /> : <Folder className="h-4 w-4 text-amber-400" />}
-                      label={m.title || "Untitled module"}
-                      onDelete={() => removeModule(m._localId)}
-                    />
+                    <Sortable id={m._localId} disabled={!canEdit}>
+                      {(dragHandle) => (
+                      <>
+                        <ExplorerRow
+                          indent={1}
+                          selected={moduleSelected}
+                          onClick={() => selectModule(m._localId)}
+                          onChevronClick={() => toggleExpand(m._localId)}
+                          chevron={isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                          icon={isOpen ? <FolderOpen className="h-4 w-4 text-amber-400" /> : <Folder className="h-4 w-4 text-amber-400" />}
+                          label={m.title || "Untitled module"}
+                          onDelete={() => removeModule(m._localId)}
+                          dragHandle={dragHandle}
+                        />
                     {isOpen && (
                       <>
+                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => onLessonDragEnd(m._localId, e)}>
+                        <SortableContext items={m.nodes.map((n) => n._localId)} strategy={verticalListSortingStrategy}>
                         {m.nodes.map((n, ni) => {
                           const lessonSelected =
                             selected.kind === "lesson" && selected.moduleLocalId === m._localId && selected.nodeIndex === ni;
                           return (
-                            <ExplorerRow
-                              key={n.id || `${m._localId}-${ni}`}
-                              indent={2}
-                              selected={lessonSelected}
-                              onClick={() => selectLesson(m._localId, ni)}
-                              icon={lessonIcon(n.type)}
-                              label={n.title || "Untitled lesson"}
-                              onDelete={() => removeLesson(m._localId, ni)}
-                            />
+                            <Sortable key={n._localId} id={n._localId} disabled={!canEdit}>
+                              {(dragHandle) => (
+                                <ExplorerRow
+                                  indent={2}
+                                  selected={lessonSelected}
+                                  onClick={() => selectLesson(m._localId, ni)}
+                                  icon={lessonIcon(n.type)}
+                                  label={n.title || "Untitled lesson"}
+                                  onDelete={() => removeLesson(m._localId, ni)}
+                                  dragHandle={dragHandle}
+                                />
+                              )}
+                            </Sortable>
                           );
                         })}
+                        </SortableContext>
+                        </DndContext>
                         {/* Inline lesson-type picker — rendered as a tree row so it
                             never gets clipped by sidebar overflow. */}
                         {!adderOpen ? (
@@ -569,9 +647,14 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
                         )}
                       </>
                     )}
+                      </>
+                      )}
+                    </Sortable>
                   </div>
                 );
               })}
+              </SortableContext>
+              </DndContext>
               {modules.length === 0 && (
                 <p className="px-4 py-6 text-xs text-fg-dim">No modules yet. Click <span className="text-brand">+ Module</span> above to create one.</p>
               )}
@@ -616,7 +699,7 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
 // ──────────────────────────── Explorer row ────────────────────────────
 
 function ExplorerRow({
-  indent, selected, onClick, onChevronClick, chevron, icon, label, onDelete,
+  indent, selected, onClick, onChevronClick, chevron, icon, label, onDelete, dragHandle,
 }: {
   indent: 0 | 1 | 2;
   selected: boolean;
@@ -626,6 +709,7 @@ function ExplorerRow({
   icon: React.ReactNode;
   label: string;
   onDelete?: () => void;
+  dragHandle?: React.ReactNode;
 }) {
   const padLeft = indent === 0 ? "pl-3" : indent === 1 ? "pl-3" : "pl-9";
   return (
@@ -637,12 +721,13 @@ function ExplorerRow({
       )}
       onClick={onClick}
     >
+      {dragHandle}
       {indent === 1 ? (
         <button
           onClick={(e) => { e.stopPropagation(); onChevronClick?.(); }}
           className="flex h-4 w-4 items-center justify-center text-fg-dim hover:text-fg"
         >{chevron}</button>
-      ) : indent === 2 ? <span className="w-4" /> : null}
+      ) : indent === 2 && !dragHandle ? <span className="w-4" /> : null}
       <span className="shrink-0">{icon}</span>
       <span className="truncate flex-1">{label}</span>
       {onDelete && (
@@ -654,6 +739,36 @@ function ExplorerRow({
       )}
     </div>
   );
+}
+
+// Sortable wrapper for a tree row. Exposes the drag handle props via render-prop
+// so only the grip starts a drag — clicking the row label still selects it.
+function Sortable({
+  id, disabled, children,
+}: {
+  id: string;
+  disabled?: boolean;
+  children: (dragHandle: React.ReactNode) => React.ReactNode;
+}) {
+  const { setNodeRef, transform, transition, attributes, listeners, isDragging } = useSortable({ id, disabled });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+    zIndex: isDragging ? 20 : undefined,
+    position: isDragging ? "relative" : undefined,
+  };
+  const handle = disabled ? null : (
+    <button
+      {...attributes}
+      {...listeners}
+      onClick={(e) => e.stopPropagation()}
+      className="flex h-4 w-4 shrink-0 cursor-grab items-center justify-center text-fg-dim opacity-40 transition hover:text-fg group-hover:opacity-100 active:cursor-grabbing"
+      title="Drag to reorder"
+      aria-label="Drag to reorder"
+    ><GripVertical className="h-3.5 w-3.5" /></button>
+  );
+  return <div ref={setNodeRef} style={style}>{children(handle)}</div>;
 }
 
 // ──────────────────────────── Course panel ────────────────────────────
@@ -802,7 +917,7 @@ function ModulePanel({
 
 // ──────────────────────────── Lesson panel ────────────────────────────
 
-function LessonPanel({ value, onChange }: { value: DraftNode; onChange: (n: DraftNode) => void }) {
+function LessonPanel({ value, onChange }: { value: DraftNode; onChange: (n: Partial<CourseNode>) => void }) {
   return (
     <div className="card">
       <NodeEditor value={value} onChange={onChange} />

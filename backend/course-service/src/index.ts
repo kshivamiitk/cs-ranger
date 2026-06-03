@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import { registerCourseUploadRoutes } from "./uploads.js";
 import { registerModerationRoutes } from "./moderation.js";
 import { NodeVideoExtras, VideoChapters, VideoSubtitles } from "./validation.js";
+import { resolveCoursePricing } from "./pricing.js";
+import { sortCourseTree, type WithPosition } from "./ordering.js";
 
 // ─── Creator storage quota ────────────────────────────────────────
 // Tunable per deployment via root .env. Hard cap on lesson-PDF uploads
@@ -248,7 +250,9 @@ app.get("/:id/detail", async (req, res) => {
       db.from("profiles").select("user_id, display_name, username, bio, college, avatar_url").eq("user_id", course.creator_id).maybeSingle(),
       db.from("reviews").select("id, rating, body, created_at, learner_id").eq("course_id", course.id).order("created_at", { ascending: false }).limit(10),
     ]);
-    return { course: { ...course, modules: modules || [] }, creator, reviews };
+    // Nested nodes come back unordered from PostgREST; sort the whole tree by
+    // position so the public curriculum matches the creator's saved order.
+    return { course: { ...course, modules: sortCourseTree(modules) }, creator, reviews };
   }, () => {
     const c = mock.courses.find((x) => x.id === req.params.id);
     if (!c) return null;
@@ -323,15 +327,31 @@ const CourseUpdate = CourseCreate.partial();
 app.patch("/:id", requireRole("creator", "admin"), async (req, res) => {
   const parsed = CourseUpdate.safeParse(req.body);
   if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message, "VALIDATION");
+  const p = parsed.data;
+
   const result = await withDb(async (db) => {
     const check = await assertCanWriteCourse(db, req.params.id, req.user!.id, req.user!.role === "admin");
     if (!check.ok) return check;
-    const p = parsed.data;
+
+    // A PATCH is partial, so a stale discount left over from a higher price (or
+    // a premium→free switch) would violate the DB CHECK `discounted_price <
+    // price` even when the caller only changed `price` — and withDb would
+    // swallow it and misreport "Course not found". resolveCoursePricing merges
+    // the patch onto the current row and keeps the pair valid (or rejects an
+    // explicitly invalid one with a clear message).
+    const { data: existing } = await db.from("courses").select("price, discounted_price").eq("id", req.params.id).maybeSingle();
+    if (!existing) return { notFound: true } as const;
+    const pricing = resolveCoursePricing(
+      { price: p.price, discounted_price: p.discounted_price },
+      { price: existing.price as number, discounted_price: existing.discounted_price as number | null },
+    );
+    if (!pricing.ok) return { ok: false as const, status: 400, code: "VALIDATION", message: pricing.error };
+
     const { data, error } = await db.from("courses").update({
       title: p.title, subtitle: p.subtitle, description: p.description,
       category_id: p.category_id, language: p.language, level: p.level, tags: p.tags,
       thumbnail_url: p.thumbnail_url, promo_video_url: p.promo_video_url,
-      price: p.price, discounted_price: p.discounted_price,
+      price: pricing.price, discounted_price: pricing.discounted_price,
       certificate_enabled: p.certificate_enabled,
     }).eq("id", req.params.id).select("*").maybeSingle();
     if (error) throw error;
@@ -339,6 +359,7 @@ app.patch("/:id", requireRole("creator", "admin"), async (req, res) => {
   }, null);
   if (!result) return fail(res, 404, "Course not found", "NOT_FOUND");
   if ("ok" in result && result.ok === false) return fail(res, result.status, result.message, result.code, result.meta);
+  if ("notFound" in result) return fail(res, 404, "Course not found", "NOT_FOUND");
   ok(res, result);
 });
 
@@ -1500,6 +1521,9 @@ app.post("/storage/verify", requireRole("creator", "admin"), async (req, res) =>
 app.get("/:id", async (req, res) => {
   const c = await withDb(async (db) => {
     const { data } = await db.from("courses").select("*, modules(*, nodes(*))").eq("id", req.params.id).maybeSingle();
+    // PostgREST returns embedded modules/nodes unordered — sort by position so
+    // the editor (and player) always see the curriculum in the saved order.
+    if (data) (data as { modules?: unknown }).modules = sortCourseTree((data as { modules?: (WithPosition & { nodes?: WithPosition[] | null })[] }).modules);
     return data;
   }, () => mock.courses.find((x) => x.id === req.params.id));
   if (!c) return fail(res, 404, "Course not found", "NOT_FOUND");
