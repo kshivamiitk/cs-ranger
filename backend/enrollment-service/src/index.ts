@@ -1,4 +1,4 @@
-import { createService, ok, fail, requireAuth, withDb, isSupabaseConfigured, consume, Topics, publish } from "@cs-ranger/shared";
+import { createService, ok, fail, requireAuth, withDb, supabaseAdmin, isSupabaseConfigured, consume, Topics, publish } from "@cs-ranger/shared";
 import { z } from "zod";
 import { applyProgress, getNodeCore, onCourseCompleted, recomputeCourseProgress, type CourseProgressResult } from "./completion.js";
 
@@ -31,11 +31,28 @@ consume<{ courseId: string; learnerId: string }>(Topics.PAYMENT_REFUNDED, async 
 // ─── REST endpoints ──────────────────────────────────────────────
 app.get("/check", requireAuth, async (req, res) => {
   const courseId = String(req.query.courseId || "");
-  const found = await withDb(async (db) => {
-    const { data } = await db.from("enrollments").select("id, progress_percent, last_node_id").eq("learner_id", req.user!.id).eq("course_id", courseId).maybeSingle();
-    return data;
-  }, null);
-  ok(res, { enrolled: !!found, ...found });
+  if (!courseId) return fail(res, 400, "courseId required", "VALIDATION");
+  if (!isSupabaseConfigured()) return ok(res, { enrolled: false });
+  // CRITICAL: do NOT swallow a DB error into enrolled:false. withDb's fallback
+  // would report a transient failure (e.g. a latency blip) as "not enrolled",
+  // which locks a paying learner out of a course they own — and because it's a
+  // *successful* response the client never retries. Surface a real error
+  // instead so the client retries and the gate only ever closes on a genuine
+  // "no enrollment row", never on a hiccup.
+  try {
+    const { data, error } = await supabaseAdmin()
+      .from("enrollments")
+      .select("id, progress_percent, last_node_id")
+      .eq("learner_id", req.user!.id)
+      .eq("course_id", courseId)
+      .maybeSingle();
+    if (error) throw error;
+    ok(res, { enrolled: !!data, ...(data || {}) });
+  } catch (err) {
+    const e = err as { message?: string; code?: string };
+    log.error("enrollment check failed", { courseId, learnerId: req.user!.id, err: e?.message, code: e?.code });
+    fail(res, 503, "Could not verify enrollment — please retry", "CHECK_FAILED");
+  }
 });
 
 app.get("/", requireAuth, async (req, res) => {

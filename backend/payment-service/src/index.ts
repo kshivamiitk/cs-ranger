@@ -1,4 +1,4 @@
-import { createService, ok, fail, mock, requireAuth, requireRole, withDb, isSupabaseConfigured, razorpay, isRazorpayConfigured, verifyWebhookSignature, verifyPaymentSignature, publish, Topics, getPlatformSetting, writeAuditLog } from "@cs-ranger/shared";
+import { createService, ok, fail, mock, requireAuth, requireRole, withDb, supabaseAdmin, isSupabaseConfigured, razorpay, isRazorpayConfigured, verifyWebhookSignature, verifyPaymentSignature, publish, Topics, getPlatformSetting, writeAuditLog } from "@cs-ranger/shared";
 import { z } from "zod";
 import { chargeableAmountPaise, decideWebhookAction, pickCapturablePayment, type PaymentStatus } from "./logic.js";
 
@@ -11,6 +11,55 @@ const PORT = Number(process.env.PORT_PAYMENT || 4006);
 // SQL hardening functions so JS and RPC calculations stay consistent.
 const commissionRate = () => getPlatformSetting("commission_rate", Number(process.env.PLATFORM_COMMISSION_RATE || 0.15));
 const refundWindowDays = () => getPlatformSetting("refund_window_days", Number(process.env.PLATFORM_REFUND_WINDOW_DAYS || 7));
+
+type VerifyRow = { transitioned: boolean; payment_id: string; course_id: string; learner_id: string; amount_paise: number };
+
+// Run verify_payment WITHOUT collapsing a thrown error into a misleading
+// fallback. withDb(fn, null) logs-and-returns-null on failure, which made
+// /verify look like "payment not found" and /reconcile falsely report
+// "enrolled" while NO enrollment was written — the classic "paid but no
+// access". Here the failure stays explicit so callers return a truthful 502,
+// and the Postgres code/details/hint are logged for diagnosis.
+async function runVerifyPayment(
+  orderId: string,
+  paymentId: string,
+  webhookEventId: string | null,
+): Promise<{ ok: true; row: VerifyRow | null } | { ok: false }> {
+  if (!isSupabaseConfigured()) return { ok: true, row: null };
+  try {
+    const { data, error } = await supabaseAdmin().rpc("verify_payment", {
+      p_order_id: orderId,
+      p_payment_id: paymentId,
+      p_webhook_event_id: webhookEventId,
+      p_commission_rate: await commissionRate(),
+    });
+    if (error) throw error;
+    const row = (Array.isArray(data) ? data[0] : data) as VerifyRow | null;
+    return { ok: true, row: row ?? null };
+  } catch (err) {
+    const e = err as { message?: string; code?: string; details?: string; hint?: string };
+    log.error("verify_payment failed — money captured but NOT finalized", {
+      orderId, paymentId, err: e?.message, code: e?.code, details: e?.details, hint: e?.hint,
+    });
+    return { ok: false };
+  }
+}
+
+// Belt-and-suspenders access guarantee: once a payment is confirmed, the buyer
+// MUST be able to open the course. verify_payment already inserts the enrollment
+// inside its transaction, but if that row is ever missing this idempotent upsert
+// restores access. The (learner_id, course_id) unique constraint makes it a
+// no-op when already enrolled, so it can never double-enroll.
+async function ensureEnrollment(learnerId: string, courseId: string): Promise<void> {
+  await withDb(async (db) => {
+    const { error } = await db.from("enrollments").upsert(
+      { learner_id: learnerId, course_id: courseId, progress_percent: 0 },
+      { onConflict: "learner_id,course_id", ignoreDuplicates: true },
+    );
+    if (error) throw error;
+    return null;
+  }, null);
+}
 
 // ─── Create Razorpay order ───────────────────────────────────────
 const CreateOrder = z.object({ courseId: z.string() });
@@ -162,18 +211,18 @@ app.post("/verify", requireAuth, async (req, res) => {
   // happen in a single SQL function so partial failures roll back. Returns
   // transitioned=true exactly once per order — repeats and the webhook race
   // get transitioned=false and we skip the event publish to avoid double-credit.
-  const result = await withDb(async (db) => {
-    const { data, error } = await db.rpc("verify_payment", {
-      p_order_id: razorpay_order_id,
-      p_payment_id: razorpay_payment_id,
-      p_webhook_event_id: null,
-      p_commission_rate: await commissionRate(),
-    });
-    if (error) throw error;
-    return Array.isArray(data) ? data[0] : data;
-  }, null);
-
+  // runVerifyPayment surfaces a real RPC failure (instead of masking it as
+  // "not found") so we never tell a paying user they're enrolled when they aren't.
+  const verify = await runVerifyPayment(razorpay_order_id, razorpay_payment_id, null);
+  if (!verify.ok) {
+    return fail(res, 502, "We couldn't finalize your payment yet. Your money is safe — please refresh in a moment.", "FINALIZE_FAILED");
+  }
+  const result = verify.row;
   if (!result || !result.payment_id) return fail(res, 404, "Payment not found", "NOT_FOUND");
+
+  // Guarantee access whenever the payment is confirmed (just transitioned OR
+  // already success) — never leave a paid learner locked out.
+  await ensureEnrollment(result.learner_id, result.course_id);
 
   if (result.transitioned) {
     await publish(Topics.PAYMENT_VERIFIED, {
@@ -234,16 +283,15 @@ async function reconcileOrder(orderId: string, expectedLearnerId: string | null)
 
   // Captured at Razorpay but not settled locally → run the same atomic path the
   // webhook uses. verify_payment is idempotent; only publish on a real transition.
-  const result = await withDb(async (db) => {
-    const { data, error } = await db.rpc("verify_payment", {
-      p_order_id: orderId,
-      p_payment_id: captured!.id,
-      p_webhook_event_id: null,
-      p_commission_rate: await commissionRate(),
-    });
-    if (error) throw error;
-    return Array.isArray(data) ? data[0] : data;
-  }, null);
+  const verify = await runVerifyPayment(orderId, captured!.id, null);
+  if (!verify.ok) {
+    // RPC failed (the Postgres cause is logged). Do NOT report success — that
+    // was the bug that told paying users "enrolled" with no enrollment row.
+    return { status: "gateway_error" };
+  }
+  const result = verify.row;
+  // Money is ours and the payment is finalized — guarantee access.
+  await ensureEnrollment(payment.learner_id, payment.course_id);
   if (result?.transitioned) {
     await publish(Topics.PAYMENT_VERIFIED, {
       paymentId: result.payment_id, courseId: result.course_id, learnerId: result.learner_id, amount: result.amount_paise,
@@ -351,16 +399,14 @@ app.post("/webhook", async (req, res) => {
   const action = decideWebhookAction(event, status);
 
   if (action.kind === "verify") {
-    const result = await withDb(async (db) => {
-      const { data, error } = await db.rpc("verify_payment", {
-        p_order_id: payment.order_id,
-        p_payment_id: payment.id,
-        p_webhook_event_id: eventId,
-        p_commission_rate: await commissionRate(),
-      });
-      if (error) throw error;
-      return Array.isArray(data) ? data[0] : data;
-    }, null);
+    const verify = await runVerifyPayment(payment.order_id, payment.id!, eventId ?? null);
+    if (!verify.ok) {
+      // Return non-2xx so Razorpay retries the webhook (a transient failure may
+      // clear); the cause is logged and /reconcile is the other safety net.
+      return fail(res, 502, "Could not finalize payment", "FINALIZE_FAILED");
+    }
+    const result = verify.row;
+    if (result?.payment_id) await ensureEnrollment(result.learner_id, result.course_id);
     if (result?.transitioned) {
       await publish(Topics.PAYMENT_VERIFIED, {
         paymentId: result.payment_id, courseId: result.course_id, learnerId: result.learner_id, amount: result.amount_paise,
