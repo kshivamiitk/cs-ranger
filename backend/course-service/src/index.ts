@@ -759,6 +759,32 @@ app.post("/uploads/pdf-url", requireRole("creator", "admin"), async (req, res) =
   ok(res, result);
 });
 
+// Confirm a completed PDF upload so its bytes count toward the creator's storage
+// quota. The browser streams the file straight to Supabase Storage via the signed
+// URL, so the bytes never reach us — the client reports the size here and we commit
+// it (and drain the reservation made in /uploads/pdf-url). This is the authoritative
+// accounting; the storage.objects trigger is a no-op (see migration 0035).
+app.post("/uploads/pdf-confirm", requireRole("creator", "admin"), async (req, res) => {
+  const path = String(req.body?.path || "");
+  const size = Number(req.body?.sizeBytes || 0);
+  if (!path || (!path.startsWith(`${req.user!.id}/`) && req.user!.role !== "admin")) {
+    return fail(res, 403, "Cannot confirm this path", "FORBIDDEN");
+  }
+  if (size <= 0 || size > PDF_MAX_BYTES) {
+    return fail(res, 400, "Invalid file size", "VALIDATION");
+  }
+  // Bill the file's owner — the path prefix — matching the "<creatorId>/<uuid>.pdf"
+  // convention that /uploads/pdf-url mints.
+  const creatorId = path.split("/")[0];
+  const result = await withDb(async (db) => {
+    const { error } = await db.rpc("commit_storage", { p_creator_id: creatorId, p_bytes: size });
+    if (error) throw error;
+    return { committed: true } as const;
+  }, null);
+  if (!result) return fail(res, 503, "Storage not configured", "STORAGE_OFFLINE");
+  ok(res, result);
+});
+
 // Signed read URL for a PDF lesson. Gated by enrollment (or ownership/admin).
 // Short TTL so a copied link rots within an hour; combined with the canvas
 // renderer + disabled save UI on the frontend, this raises the bar a lot.

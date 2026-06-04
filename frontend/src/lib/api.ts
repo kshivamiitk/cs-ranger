@@ -260,6 +260,12 @@ export const api = {
       unwrap<{ signedUrl: string; token: string; path: string }>(
         axiosClient().post("/courses/uploads/pdf-url", b),
       ),
+    // Called after the browser PUTs the PDF to Supabase, so the backend can count
+    // the bytes toward the creator's storage quota (the file bypasses our servers).
+    pdfConfirm: (b: { path: string; sizeBytes: number }) =>
+      unwrap<{ committed: boolean }>(
+        axiosClient().post("/courses/uploads/pdf-confirm", b),
+      ),
     pdfViewUrl: (nodeId: string) =>
       unwrap<{ signedUrl: string; expiresIn: number }>(
         axiosClient().get(`/courses/nodes/${nodeId}/pdf-view-url`),

@@ -367,7 +367,16 @@ function PdfEditor({ value, onChange }: { value: Partial<CourseNode>; onChange: 
         body: file,
       });
       if (!r.ok) throw new Error(`Upload failed (${r.status})`);
-      // 3. Save the storage path on the lesson (NOT a public URL — bucket is
+      // 3. Tell the backend the upload landed so its size counts toward the
+      //    storage quota — the bytes went straight to Supabase, so the server
+      //    only learns the size here. Best-effort: the file is uploaded either
+      //    way, so a hiccup in accounting must not fail the lesson edit.
+      try {
+        await api.courses.pdfConfirm({ path, sizeBytes: file.size });
+      } catch (e) {
+        console.warn("storage usage confirm failed", e);
+      }
+      // 4. Save the storage path on the lesson (NOT a public URL — bucket is
       //    private). The learner-side viewer signs it via /pdf-view-url.
       onChange({ ...value, pdf_url: path });
     } catch (e) {
