@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Flame, Sparkles, TrendingUp, Clock, Loader2 } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
+import { SiteTour, SiteTourButton } from "@/components/common/SiteTour";
 import { CourseCard } from "@/components/common/CourseCard";
 import { Heatmap } from "@/components/common/Heatmap";
 import { Progress } from "@/components/common/Progress";
@@ -52,6 +53,8 @@ export default function LearnerHome() {
   return (
     <>
       <Navbar />
+      {/* Auto-starts the first-login walkthrough once for new users. */}
+      <SiteTour />
       <main className="mx-auto max-w-7xl px-4 py-10 md:px-6">
         <section className="mb-10 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
@@ -60,10 +63,13 @@ export default function LearnerHome() {
               {streak?.current_streak ? `You're on a ${streak.current_streak}-day streak. Keep it going.` : "Start a learning streak today."}
             </p>
           </div>
-          <div className="flex gap-3">
-            <Stat icon={<Flame className="h-5 w-5 text-orange-400" />} value={String(streak?.current_streak ?? 0)} label="Day streak" />
-            <Stat icon={<TrendingUp className="h-5 w-5 text-success" />} value={String(inProgress.length)} label="In progress" />
-            <Stat icon={<Sparkles className="h-5 w-5 text-brand" />} value={String(summary?.badges.earned ?? 0)} label="Badges" />
+          <div className="flex flex-col items-start gap-3 md:items-end">
+            <SiteTourButton className="btn-ghost text-xs" />
+            <div className="flex gap-3">
+              <Stat icon={<Flame className="h-5 w-5 text-orange-400" />} value={String(streak?.current_streak ?? 0)} label="Day streak" />
+              <Stat icon={<TrendingUp className="h-5 w-5 text-success" />} value={String(inProgress.length)} label="In progress" />
+              <Stat icon={<Sparkles className="h-5 w-5 text-brand" />} value={String(summary?.badges.earned ?? 0)} label="Badges" />
+            </div>
           </div>
         </section>
 

@@ -72,6 +72,17 @@ export default function CreatorOverviewPage() {
           <CreatorTermsModal status={termsStatus} onAccepted={() => setShowTerms(false)} onClose={() => setShowTerms(false)} />
         )}
 
+        <Link
+          href="/creator/guide"
+          className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand/40 bg-brand/10 p-4 transition hover:border-brand hover:shadow-glow"
+        >
+          <span className="flex items-center gap-2 text-sm">
+            <Sparkles className="h-4 w-4 text-brand" />
+            <span><strong>New to creating?</strong> Read the Creator Guide — how to build a course and what matters most.</span>
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-brand">Open guide <ArrowRight className="h-4 w-4" /></span>
+        </Link>
+
         <section data-tour="kpi-strip" className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KPI icon={<Wallet className="h-5 w-5 text-brand" />} label="Total earnings" value={formatINR((stats?.totalRevenue ?? 0) / 100)} delta="all-time" />
           <KPI icon={<Users className="h-5 w-5 text-success" />} label="Total students" value={formatCompact(stats?.totalStudents ?? 0)} delta="across all courses" />

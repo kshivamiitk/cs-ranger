@@ -401,22 +401,53 @@ app.post("/:id/submit-review", requireRole("creator"), async (req, res) => {
   ok(res, result);
 });
 
-// Notify a creator's followers when one of their courses goes live. Batched
-// insert capped at 500 followers; a sentinel check prevents re-notifying on
-// republish. Realtime broadcast is intentionally skipped (bell polling covers
-// it) to avoid a per-follower fan-out loop.
-async function notifyFollowersOfPublish(courseId: string, creatorId: string | undefined): Promise<void> {
+// Notify the right audience when a course goes live, branching on whether the
+// course was ever published before:
+//   • First publish   → tell the creator's FOLLOWERS a new course is out
+//                        ("new_course", from the subscriptions table).
+//   • Re-publish (edit)→ tell everyone ENROLLED the course was UPDATED
+//                        ("course_updated", from the enrollments table) — and
+//                        deliberately NOT "new_course".
+// Realtime broadcast is intentionally skipped (bell polling covers it) to avoid
+// a per-recipient fan-out loop. `wasPublishedBefore` is derived from the course's
+// pre-update published_at (stamped only on the first publish — see 0013 trigger).
+async function notifyOnPublish(courseId: string, creatorId: string | undefined, wasPublishedBefore: boolean): Promise<void> {
   if (!creatorId) return;
   await withDb(async (db) => {
+    const { data: course } = await db.from("courses").select("title").eq("id", courseId).maybeSingle();
+    if (!course) return null;
+
+    if (wasPublishedBefore) {
+      // Skip if we already told learners about an update to this course in the
+      // last 6h, so rapid edit→republish cycles don't spam the same people.
+      const sinceIso = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+      const { data: recent } = await db.from("notifications")
+        .select("id").eq("type", "course_updated").eq("href", `/course/${courseId}`)
+        .gte("created_at", sinceIso).limit(1).maybeSingle();
+      if (recent) return null;
+      const { data: enrolled } = await db.from("enrollments")
+        .select("learner_id").eq("course_id", courseId).limit(2000);
+      if (!enrolled || enrolled.length === 0) return null;
+      await db.from("notifications").insert(enrolled.map((e) => ({
+        user_id: e.learner_id,
+        type: "course_updated",
+        title: "A course you're enrolled in was updated",
+        body: course.title,
+        href: `/course/${courseId}`,
+      })));
+      return null;
+    }
+
+    // First publish — announce the new course to followers (one-time sentinel
+    // guards against a duplicate insert if this path runs twice).
     const { data: already } = await db.from("notifications")
       .select("id").eq("type", "new_course").eq("href", `/course/${courseId}`).limit(1).maybeSingle();
     if (already) return null;
-    const [{ data: course }, { data: creatorProfile }, { data: subs }] = await Promise.all([
-      db.from("courses").select("title").eq("id", courseId).maybeSingle(),
+    const [{ data: creatorProfile }, { data: subs }] = await Promise.all([
       db.from("profiles").select("display_name").eq("user_id", creatorId).maybeSingle(),
       db.from("subscriptions").select("learner_id").eq("creator_id", creatorId).limit(500),
     ]);
-    if (!course || !subs || subs.length === 0) return null;
+    if (!subs || subs.length === 0) return null;
     await db.from("notifications").insert(subs.map((s) => ({
       user_id: s.learner_id,
       type: "new_course",
@@ -432,14 +463,19 @@ async function notifyFollowersOfPublish(courseId: string, creatorId: string | un
 // least one module and one lesson — otherwise the catalog would show an empty
 // course. published_at is stamped by the trg_courses_published_at trigger.
 app.post("/:id/publish", requireRole("creator"), async (req, res) => {
+  // Captured inside the closure, read after — a non-null published_at means this
+  // course has gone live before, so it's an edit→re-publish, not a brand-new
+  // course (the 0013 trigger only stamps published_at on the first publish).
+  let wasPublishedBefore = false;
   const result = await withDb(async (db) => {
     const terms = await creatorTermsCheck(db, req.user!.id, req.user!.role === "admin");
     if (terms) return terms;
     const check = await assertCanWriteCourse(db, req.params.id, req.user!.id, req.user!.role === "admin");
     if (!check.ok) return check;
-    const { data: course } = await db.from("courses").select("id, creator_id, title").eq("id", req.params.id).maybeSingle();
+    const { data: course } = await db.from("courses").select("id, creator_id, title, published_at").eq("id", req.params.id).maybeSingle();
     if (!course) return { notFound: true } as const;
     if (!course.title || course.title.trim().length < 3) return { invalid: "Course title needs at least 3 characters" } as const;
+    wasPublishedBefore = course.published_at != null;
     const { count: lessonCount } = await db
       .from("nodes")
       .select("id, modules!inner(course_id)", { count: "exact", head: true })
@@ -457,13 +493,20 @@ app.post("/:id/publish", requireRole("creator"), async (req, res) => {
   if ("notFound" in result) return fail(res, 404, "Course not found", "NOT_FOUND");
   if ("invalid" in result) return fail(res, 400, result.invalid ?? "Invalid request", "VALIDATION");
   await publish(Topics.COURSE_PUBLISHED, { courseId: (result as { id: string }).id, creatorId: req.user!.id });
-  await notifyFollowersOfPublish((result as { id: string }).id, req.user!.id);
+  await notifyOnPublish((result as { id: string }).id, req.user!.id, wasPublishedBefore);
   ok(res, result);
 });
 
 app.post("/:id/approve", requireRole("admin"), async (req, res) => {
+  // Was it ever live before? Only stamp published_at on the first approval so
+  // re-approving an edited course preserves the original "since when" date.
+  let wasPublishedBefore = false;
   const result = await withDb(async (db) => {
-    const { data, error } = await db.from("courses").update({ status: "published", published_at: new Date().toISOString() }).eq("id", req.params.id).select("id, status, creator_id, title").maybeSingle();
+    const { data: prior } = await db.from("courses").select("published_at").eq("id", req.params.id).maybeSingle();
+    wasPublishedBefore = prior?.published_at != null;
+    const patch: Record<string, unknown> = { status: "published" };
+    if (!wasPublishedBefore) patch.published_at = new Date().toISOString();
+    const { data, error } = await db.from("courses").update(patch).eq("id", req.params.id).select("id, status, creator_id, title").maybeSingle();
     if (error) throw error;
     if (data) {
       await db.from("admin_audit_log").insert({ admin_id: req.user!.id, action: "course.approve", target_type: "course", target_id: data.id });
@@ -473,7 +516,7 @@ app.post("/:id/approve", requireRole("admin"), async (req, res) => {
   }, () => ({ id: req.params.id, status: "published" as const, creator_id: "u2", title: "" }));
   if (!result) return fail(res, 404, "Not found", "NOT_FOUND");
   await publish(Topics.COURSE_PUBLISHED, { courseId: result.id, creatorId: (result as { creator_id?: string }).creator_id });
-  await notifyFollowersOfPublish(result.id, (result as { creator_id?: string }).creator_id);
+  await notifyOnPublish(result.id, (result as { creator_id?: string }).creator_id, wasPublishedBefore);
   ok(res, result);
 });
 

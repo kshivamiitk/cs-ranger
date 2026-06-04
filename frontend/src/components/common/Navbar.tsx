@@ -1,18 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 import { NotificationBell } from "./NotificationBell";
 import { AvatarMenu } from "./AvatarMenu";
+import { RoleSwitcher } from "./RoleSwitcher";
 import { useApp } from "@/app/providers";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { prefetchLearnerDashboard, prefetchCreatorDashboard } from "@/lib/prefetch";
 
 const LEARNER_LINKS = [
   { href: "/home", label: "Home" },
@@ -32,6 +32,7 @@ const CREATOR_LINKS = [
   { href: "/creator/doubts", label: "Doubts" },
   { href: "/creator/storage", label: "Storage" },
   { href: "/creator/finance", label: "Finance" },
+  { href: "/creator/guide", label: "Guide" },
 ];
 
 const ADMIN_LINKS = [
@@ -49,17 +50,8 @@ const ADMIN_LINKS = [
 
 export function Navbar({ variant }: { variant?: "learner" | "creator" | "admin" | "public" }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const qc = useQueryClient();
-  const { user, roleView, setRoleView } = useApp();
+  const { user } = useApp();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const userId = user?.user_id || user?.id;
-
-  // Switching role view navigates to that role's home. We prefetch the destination's
-  // data on hover/focus so the dashboard is already in cache by the time it's clicked —
-  // the round trip happens during the hover, not after the click.
-  function goLearner() { setRoleView("learner"); router.push("/home"); }
-  function goCreator() { setRoleView("creator"); router.push("/creator/overview"); }
 
   // Match the creator/admin SECTIONS exactly — note `/creators` (the public creators
   // directory) must NOT count as the `/creator` dashboard, so check for the trailing slash.
@@ -95,10 +87,10 @@ export function Navbar({ variant }: { variant?: "learner" | "creator" | "admin" 
               <Link
                 key={l.href}
                 href={l.href}
-                // Stable data-tour slug for the creator onboarding tour to anchor
-                // popovers on (e.g. "nav-courses" → "/creator/courses"). Slug is
-                // last URL segment, prefixed with "nav-".
-                data-tour={v === "creator" ? `nav-${l.href.split("/").pop()}` : undefined}
+                // Stable data-tour slug for the onboarding tours to anchor popovers
+                // on. Creator links get "nav-<seg>" (e.g. "nav-courses"); learner
+                // links get "lnav-<seg>" (e.g. "lnav-catalog") for the site tour.
+                data-tour={v === "creator" ? `nav-${l.href.split("/").pop()}` : v === "learner" ? `lnav-${l.href.split("/").pop()}` : undefined}
                 className={cn(
                   "rounded-full px-3 py-1.5 text-sm font-medium transition",
                   pathname === l.href || pathname.startsWith(l.href + "/")
@@ -113,35 +105,12 @@ export function Navbar({ variant }: { variant?: "learner" | "creator" | "admin" 
           </nav>
         )}
         <div className="ml-auto flex items-center gap-2">
-          {user && (user.roles?.length ?? 0) > 1 && v !== "public" && (
-            <div className="hidden items-center rounded-full border border-border bg-surface-2 p-0.5 text-xs md:flex">
-              {user.roles?.includes("learner") && (
-                <button
-                  onClick={goLearner}
-                  onMouseEnter={() => prefetchLearnerDashboard(qc, userId)}
-                  onFocus={() => prefetchLearnerDashboard(qc, userId)}
-                  className={cn("rounded-full px-2.5 py-1 transition", roleView === "learner" ? "bg-brand-gradient text-white shadow-glow" : "text-fg-dim hover:text-fg")}
-                >
-                  Learner
-                </button>
-              )}
-              {user.roles?.includes("creator") && (
-                <button
-                  onClick={goCreator}
-                  onMouseEnter={() => prefetchCreatorDashboard(qc, userId)}
-                  onFocus={() => prefetchCreatorDashboard(qc, userId)}
-                  className={cn("rounded-full px-2.5 py-1 transition", roleView === "creator" ? "bg-brand-gradient text-white shadow-glow" : "text-fg-dim hover:text-fg")}
-                >
-                  Creator
-                </button>
-              )}
-            </div>
-          )}
+          {v !== "public" && <RoleSwitcher className="hidden md:block" tourId="role-switcher" />}
           <ThemeToggle />
           {user ? (
             <>
-              <NotificationBell />
-              <AvatarMenu />
+              <span data-tour="notif-bell"><NotificationBell /></span>
+              <span data-tour="avatar-menu"><AvatarMenu /></span>
             </>
           ) : (
             <div className="flex items-center gap-2">
@@ -163,6 +132,9 @@ export function Navbar({ variant }: { variant?: "learner" | "creator" | "admin" 
       {mobileOpen && v !== "public" && (
         <nav className="border-t border-border bg-bg/95 backdrop-blur-xl lg:hidden">
           <div className="mx-auto flex max-w-7xl flex-col gap-1 p-3">
+            <div className="mb-1 md:hidden">
+              <RoleSwitcher />
+            </div>
             {links.map((l) => (
               <Link
                 key={l.href}

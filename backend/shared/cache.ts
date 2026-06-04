@@ -1,4 +1,23 @@
-import { redis } from "./events";
+import { redis, withTimeout } from "./events";
+
+// How long a single cache read/write may take before we give up and treat it
+// as a miss. Tuned low: a healthy Redis answers in <5ms, so 1s only ever bites
+// when the server is actually unreachable.
+const CACHE_OP_TIMEOUT_MS = 1000;
+// Once a cache op times out / errors we assume Redis is down and skip it
+// entirely for this window, so we don't pay the timeout on every request.
+const BREAKER_COOLDOWN_MS = 10_000;
+let redisDownUntil = 0;
+
+/** Redis client to use for caching, or null if unconfigured or the breaker is open. */
+function cacheClient() {
+  if (Date.now() < redisDownUntil) return null;
+  return redis();
+}
+
+function tripBreaker() {
+  redisDownUntil = Date.now() + BREAKER_COOLDOWN_MS;
+}
 
 /**
  * Tiny read-through cache wrapper for hot endpoints whose payloads are
@@ -20,19 +39,22 @@ export async function withCache<T>(
   ttlSeconds: number,
   compute: () => Promise<T>,
 ): Promise<T> {
-  const r = redis();
+  const r = cacheClient();
   if (!r) return compute();
   try {
-    const cached = await r.get(key);
+    const cached = await withTimeout(r.get(key), CACHE_OP_TIMEOUT_MS, "cache get");
     if (cached) return JSON.parse(cached) as T;
   } catch {
-    /* Redis hiccup — fall through to compute, don't fail the request. */
+    /* Redis hiccup or down — trip the breaker and serve from compute(). */
+    tripBreaker();
+    return compute();
   }
   const fresh = await compute();
   try {
-    await r.set(key, JSON.stringify(fresh), "EX", ttlSeconds);
+    await withTimeout(r.set(key, JSON.stringify(fresh), "EX", ttlSeconds), CACHE_OP_TIMEOUT_MS, "cache set");
   } catch {
     /* Best-effort set. If it fails, the next request just recomputes. */
+    tripBreaker();
   }
   return fresh;
 }
@@ -44,12 +66,12 @@ export async function withCache<T>(
  * snapshot faster than the TTL would allow.
  */
 export async function bustCache(...keys: string[]): Promise<void> {
-  const r = redis();
+  const r = cacheClient();
   if (!r || keys.length === 0) return;
   try {
-    await r.del(...keys);
+    await withTimeout(r.del(...keys), CACHE_OP_TIMEOUT_MS, "cache del");
   } catch {
-    /* ignore */
+    tripBreaker();
   }
 }
 
@@ -60,14 +82,16 @@ export async function bustCache(...keys: string[]): Promise<void> {
  * snapshot after a course publish.
  */
 export async function bustPrefix(prefix: string): Promise<void> {
-  const r = redis();
+  const r = cacheClient();
   if (!r) return;
   try {
-    const stream = r.scanStream({ match: `${prefix}*`, count: 200 });
-    for await (const keys of stream) {
-      if (keys && keys.length) await r.unlink(...keys);
-    }
+    await withTimeout((async () => {
+      const stream = r.scanStream({ match: `${prefix}*`, count: 200 });
+      for await (const keys of stream) {
+        if (keys && keys.length) await r.unlink(...keys);
+      }
+    })(), CACHE_OP_TIMEOUT_MS, "cache scan/unlink");
   } catch {
-    /* ignore */
+    tripBreaker();
   }
 }

@@ -3,6 +3,22 @@ import { Queue, Worker, type Processor } from "bullmq";
 
 let _redis: IORedis | null = null;
 const queues = new Map<string, Queue>();
+let lastRedisErrorLog = 0;
+
+/**
+ * Race a promise against a timer so a hung Redis command (e.g. when the server
+ * is down and the command sits in ioredis's offline queue, which never rejects
+ * with maxRetriesPerRequest: null) can't stall the HTTP request. The underlying
+ * promise is left to settle on its own; we just stop waiting on it.
+ */
+export function withTimeout<T>(p: Promise<T>, ms: number, label = "redis op"): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    timer.unref?.();
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
 
 // Exported so the cache helper (and any other module that needs the same
 // connection — events + cache should share one client, not open two) can use it.
@@ -10,7 +26,24 @@ export function redis(): IORedis | null {
   if (_redis) return _redis;
   const url = process.env.REDIS_URL;
   if (!url) return null;
-  _redis = new IORedis(url, { maxRetriesPerRequest: null });
+  // maxRetriesPerRequest stays null because BullMQ requires it (it issues
+  // blocking commands that legitimately wait). retryStrategy caps reconnection
+  // backoff so a down Redis doesn't storm, and the bounded connectTimeout means
+  // a single connect attempt fails fast. The error listener is essential: ioredis
+  // emits 'error' on every connection failure, and an unhandled 'error' event
+  // would crash the whole service when Redis goes down.
+  _redis = new IORedis(url, {
+    maxRetriesPerRequest: null,
+    connectTimeout: 3000,
+    retryStrategy: (times) => Math.min(times * 200, 2000),
+  });
+  _redis.on("error", (err) => {
+    const now = Date.now();
+    if (now - lastRedisErrorLog > 30_000) {
+      lastRedisErrorLog = now;
+      console.error(JSON.stringify({ level: "warn", msg: "redis error", err: err?.message }));
+    }
+  });
   return _redis;
 }
 
@@ -48,7 +81,18 @@ export async function publish<T = unknown>(topic: Topic, payload: T): Promise<vo
     q = new Queue(topic, { connection: r });
     queues.set(topic, q);
   }
-  await q.add(topic, payload, { removeOnComplete: 1000, removeOnFail: 5000, attempts: 5, backoff: { type: "exponential", delay: 1000 } });
+  // Don't let enqueuing an event hang the request when Redis is down — the add
+  // would otherwise sit in the offline queue indefinitely. If it times out we
+  // drop the event (best-effort) and let the originating request succeed.
+  try {
+    await withTimeout(
+      q.add(topic, payload, { removeOnComplete: 1000, removeOnFail: 5000, attempts: 5, backoff: { type: "exponential", delay: 1000 } }),
+      2000,
+      `publish ${topic}`,
+    );
+  } catch (err) {
+    console.error(JSON.stringify({ level: "warn", msg: "event publish failed", topic, err: err instanceof Error ? err.message : String(err) }));
+  }
 }
 
 export function consume<T = unknown>(topic: Topic, handler: (payload: T) => Promise<void>) {
