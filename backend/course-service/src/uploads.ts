@@ -173,8 +173,10 @@ export function registerCourseUploadRoutes(app: Express, helpers: UploadHelpers)
       if (!courseId) return { error: { status: 404, message: "Lesson not found", code: "NOT_FOUND" } };
       const role = await courseEditorRole(db, courseId, req.user!.id, req.user!.role === "admin");
       if (!role) {
-        const { data: enrollment } = await db.from("enrollments").select("id").eq("learner_id", req.user!.id).eq("course_id", courseId).maybeSingle();
-        if (!enrollment) return { error: { status: 403, message: "Enroll in the course to download attachments", code: "NOT_ENROLLED" } };
+        const { data: enrollment } = await db.from("enrollments").select("id, access_expires_at").eq("learner_id", req.user!.id).eq("course_id", courseId).maybeSingle();
+        const expiresAt = (enrollment as { access_expires_at?: string | null } | null)?.access_expires_at ?? null;
+        const active = !!enrollment && (expiresAt === null || new Date(expiresAt).getTime() > Date.now());
+        if (!active) return { error: { status: 403, message: "Your access to this course has ended — renew to download attachments", code: "ACCESS_ENDED" } };
       }
       const { data } = await db.from("uploaded_assets")
         .select("*").eq("entity_type", "node_attachment").eq("entity_id", nodeId)

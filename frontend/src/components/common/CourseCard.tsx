@@ -88,7 +88,7 @@ function CourseCardImpl({ course, href }: { course: Course; href?: string }) {
               <span className="gradient-text">Free</span>
             ) : (
               <>
-                {formatINR(course.discounted_price || course.price)}
+                {formatINR(course.discounted_price || course.price)}<span className="text-xs font-normal text-fg-dim"> /mo</span>
                 {course.discounted_price && (
                   <span className="ml-2 text-xs font-normal text-fg-dim line-through">{formatINR(course.price)}</span>
                 )}

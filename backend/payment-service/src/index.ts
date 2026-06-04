@@ -80,12 +80,14 @@ app.post("/create-order", requireAuth, async (req, res) => {
   if (course.status !== "published") return fail(res, 400, "Course not available", "UNAVAILABLE");
   if (!course.price || course.price === 0) return fail(res, 400, "Course is free — use enrollment endpoint", "FREE_COURSE");
 
-  // 2a. Prevent duplicate enrollment
+  // 2a. Per-month model: a re-purchase EXTENDS access by another 30 days, so we
+  // only block when the learner already has PERMANENT access (access_expires_at
+  // IS NULL — a grandfathered or free enrollment), where paying again does nothing.
   const existing = await withDb(async (db) => {
-    const { data } = await db.from("enrollments").select("id").eq("learner_id", req.user!.id).eq("course_id", courseId).maybeSingle();
-    return data;
+    const { data } = await db.from("enrollments").select("id, access_expires_at").eq("learner_id", req.user!.id).eq("course_id", courseId).maybeSingle();
+    return data as { id: string; access_expires_at: string | null } | null;
   }, null);
-  if (existing) return fail(res, 409, "Already enrolled", "ALREADY_ENROLLED");
+  if (existing && existing.access_expires_at === null) return fail(res, 409, "You already have lifetime access to this course", "ALREADY_ENROLLED");
 
   // Charge amount (paise). chargeableAmountPaise encodes the discount rules:
   // discounted_price applies only when positive AND strictly below price, so a

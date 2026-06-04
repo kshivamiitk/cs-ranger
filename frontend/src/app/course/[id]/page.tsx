@@ -175,12 +175,19 @@ export default function CourseDetailPage() {
                     ) : (
                       <>
                         <span className="font-display text-3xl font-bold">{formatINR(course.discounted_price || course.price)}</span>
+                        <span className="text-sm font-normal text-fg-dim">/ month</span>
                         {course.discounted_price && <span className="text-sm text-fg-dim line-through">{formatINR(course.price)}</span>}
                       </>
                     )}
                   </div>
                   {course.discounted_price && course.price && (
                     <p className="mt-1 text-xs text-success">Limited-time price · {Math.round((1 - course.discounted_price / course.price) * 100)}% off</p>
+                  )}
+                  {isEnrolled && enrollment?.access_expires_at && (
+                    <p className="mt-1 text-xs text-fg-dim">Access until {new Date(enrollment.access_expires_at).toLocaleDateString()} · {Math.max(0, Math.ceil((new Date(enrollment.access_expires_at).getTime() - Date.now()) / 86400000))} days left</p>
+                  )}
+                  {enrollment?.expired && (
+                    <p className="mt-1 text-xs text-amber-400">Your access ended — renew for another month to continue.</p>
                   )}
                   {(payError || enrollError) && (
                     <div className="mt-3 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 p-2.5 text-xs text-danger">
@@ -202,7 +209,7 @@ export default function CourseDetailPage() {
                     )
                   ) : (
                     <button onClick={handleEnroll} disabled={payBusy || enrollBusy} className="btn-primary mt-5 w-full disabled:opacity-50">
-                      {payBusy || enrollBusy ? <><Loader2 className="h-4 w-4 animate-spin" /> Enrolling…</> : course.price === 0 ? "Enroll Free" : "Enroll Now"}
+                      {payBusy || enrollBusy ? <><Loader2 className="h-4 w-4 animate-spin" /> Enrolling…</> : course.price === 0 ? "Enroll Free" : enrollment?.expired ? "Renew · 1 month" : "Enroll Now"}
                     </button>
                   )}
                   {!isOwner && (

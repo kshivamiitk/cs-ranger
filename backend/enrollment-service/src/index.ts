@@ -42,12 +42,21 @@ app.get("/check", requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin()
       .from("enrollments")
-      .select("id, progress_percent, last_node_id")
+      .select("id, progress_percent, last_node_id, access_expires_at")
       .eq("learner_id", req.user!.id)
       .eq("course_id", courseId)
       .maybeSingle();
     if (error) throw error;
-    ok(res, { enrolled: !!data, ...(data || {}) });
+    // Per-month access: enrolled === has an UNEXPIRED window (NULL = permanent).
+    const expiresAt = (data as { access_expires_at?: string | null } | null)?.access_expires_at ?? null;
+    const active = !!data && (expiresAt === null || new Date(expiresAt).getTime() > Date.now());
+    ok(res, {
+      enrolled: active,
+      expired: !!data && !active,
+      access_expires_at: expiresAt,
+      progress_percent: (data as { progress_percent?: number } | null)?.progress_percent,
+      last_node_id: (data as { last_node_id?: string } | null)?.last_node_id,
+    });
   } catch (err) {
     const e = err as { message?: string; code?: string };
     log.error("enrollment check failed", { courseId, learnerId: req.user!.id, err: e?.message, code: e?.code });
@@ -62,7 +71,7 @@ app.get("/", requireAuth, async (req, res) => {
   // Uses idx_enrollments_learner_last (learner_id, last_accessed_at desc).
   const list = await withDb(async (db) => {
     const { data } = await db.from("enrollments")
-      .select("id, course_id, progress_percent, last_node_id, last_accessed_at, completed_at, enrolled_at, courses(id, title, thumbnail_url, duration_seconds)")
+      .select("id, course_id, progress_percent, last_node_id, last_accessed_at, completed_at, enrolled_at, access_expires_at, courses(id, title, thumbnail_url, duration_seconds)")
       .eq("learner_id", req.user!.id)
       .order("last_accessed_at", { ascending: false });
     return data || [];

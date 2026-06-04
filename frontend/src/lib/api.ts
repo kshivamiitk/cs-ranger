@@ -385,7 +385,7 @@ export const api = {
   // Enrollments
   enrollments: {
     list: () => unwrap<Enrollment[]>(axiosClient().get("/enrollments/")),
-    check: (courseId: string) => unwrap<{ enrolled: boolean; progress_percent?: number; last_node_id?: string }>(axiosClient().get("/enrollments/check", { params: { courseId } })),
+    check: (courseId: string) => unwrap<{ enrolled: boolean; expired?: boolean; access_expires_at?: string | null; progress_percent?: number; last_node_id?: string }>(axiosClient().get("/enrollments/check", { params: { courseId } })),
     enrollFree: (courseId: string) => unwrap<Enrollment>(axiosClient().post("/enrollments/", { courseId })),
     markComplete: (nodeId: string) => unwrap<NodeProgressResult>(axiosClient().post(`/enrollments/progress/${nodeId}/complete`, {})),
     // Unified completion-engine update: scroll/watch signals + optional explicit markDone.

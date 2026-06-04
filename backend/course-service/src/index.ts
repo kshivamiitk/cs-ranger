@@ -808,8 +808,10 @@ app.get("/nodes/:nodeId/pdf-view-url", requireAuth, async (req, res) => {
     const isOwner = req.user!.id === creatorId || req.user!.role === "admin";
     if (!isOwner) {
       const { data: enr } = await db.from("enrollments")
-        .select("id").eq("learner_id", req.user!.id).eq("course_id", courseId).maybeSingle();
-      if (!enr) return { forbidden: true } as const;
+        .select("id, access_expires_at").eq("learner_id", req.user!.id).eq("course_id", courseId).maybeSingle();
+      const expiresAt = (enr as { access_expires_at?: string | null } | null)?.access_expires_at ?? null;
+      const active = !!enr && (expiresAt === null || new Date(expiresAt).getTime() > Date.now());
+      if (!active) return { forbidden: true } as const;
     }
     const { data, error } = await db.storage.from(PDF_BUCKET).createSignedUrl(path, PDF_VIEW_TTL_SECONDS);
     if (error || !data) return null;
