@@ -21,6 +21,13 @@ import {
 const THUMB_MAX_BYTES = 5 * 1024 * 1024;
 const THUMB_MIME = ["image/jpeg", "image/png", "image/webp"];
 const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+// Inline rich-text images (quiz prompts/options/explanations). Stored in the
+// PUBLIC course-assets bucket so the <img src> baked into the saved HTML stays
+// valid forever, and counted against the uploader's storage quota like PDFs.
+const RICH_IMG_MAX_BYTES = 5 * 1024 * 1024;
+const RICH_IMG_MIME = ["image/jpeg", "image/png", "image/webp"]; // match the course-assets bucket allow-list
+const STORAGE_FREE_MB = Number(process.env.CREATOR_STORAGE_FREE_MB || 2);
+const BYTES_PER_MB = 1024 * 1024;
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: ATTACHMENT_MAX_BYTES, files: 1 } });
@@ -109,6 +116,53 @@ export function registerCourseUploadRoutes(app: Express, helpers: UploadHelpers)
 
     if ("error" in result) return fail(res, result.error.status, result.error.message, result.error.code);
     ok(res, { ...result.asset, url: await assetDownloadUrl(result.asset) });
+  });
+
+  // ── Inline rich-text images (quiz editor "add image") ──
+  // Public bucket → permanent URL embedded in the question/option HTML. Bills the
+  // uploader's storage quota (commit_storage; the storage trigger is a no-op).
+  app.post("/uploads/rich-image", requireRole("creator", "admin"), singleFile("file"), async (req, res) => {
+    const file = req.file;
+    if (!file) return fail(res, 400, "Attach an image as the multipart 'file' field", "VALIDATION");
+    const check = validateUpload({ mimeType: file.mimetype, sizeBytes: file.size, allowedMime: RICH_IMG_MIME, maxBytes: RICH_IMG_MAX_BYTES });
+    if (!check.ok) return fail(res, 400, check.message, "VALIDATION");
+    const nodeId = String(req.body?.nodeId || req.query.nodeId || "") || null;
+    const creatorId = req.user!.id;
+
+    type RichOk = { url: string; path: string; storage: string };
+    type RichErr = { error: { status: number; message: string; code: string; meta?: Record<string, unknown> } };
+    const result = await withDb<RichOk | RichErr>(async (db) => {
+      // Quota pre-check (bill the uploader, same as PDF lessons).
+      const { data: row } = await db.from("creator_storage")
+        .select("bytes_used, extra_bytes, extra_until").eq("creator_id", creatorId).maybeSingle();
+      const used = Number((row as { bytes_used?: number } | null)?.bytes_used ?? 0);
+      const extraBytes = Number((row as { extra_bytes?: number } | null)?.extra_bytes ?? 0);
+      const extraUntil = (row as { extra_until?: string | null } | null)?.extra_until ?? null;
+      const extraValid = !!extraUntil && new Date(extraUntil).getTime() > Date.now();
+      const quota = STORAGE_FREE_MB * BYTES_PER_MB + (extraValid ? extraBytes : 0);
+      if (used + file.size > quota) {
+        return { error: { status: 402, message: "You're over your storage quota. Free up space or buy more storage.", code: "QUOTA_EXCEEDED", meta: { used, quota, needed: file.size } } };
+      }
+
+      const storagePath = normalizeStoragePath(`rich/${creatorId}`, file.originalname);
+      const stored = await storeFile({ bucket: "course-assets", path: storagePath, buffer: file.buffer, mimeType: file.mimetype, publicBucket: true });
+
+      // Count the bytes toward the creator's quota (authoritative app-side accounting).
+      const { error: commitErr } = await db.rpc("commit_storage", { p_creator_id: creatorId, p_bytes: file.size });
+      if (commitErr) throw commitErr;
+
+      await db.from("uploaded_assets").insert({
+        owner_id: creatorId, bucket: "course-assets", path: storagePath,
+        original_filename: file.originalname, mime_type: file.mimetype, size_bytes: file.size,
+        entity_type: "rich_image", entity_id: nodeId,
+      });
+
+      const url = stored.publicUrl || `${API_BASE}/courses/uploads/local-file?bucket=course-assets&path=${encodeURIComponent(storagePath)}`;
+      return { url, path: storagePath, storage: stored.storage };
+    }, () => ({ error: { status: 503, message: "Image upload needs a configured database", code: "DB_REQUIRED" } }));
+
+    if ("error" in result) return fail(res, result.error.status, result.error.message, result.error.code, result.error.meta);
+    ok(res, result);
   });
 
   // List a lesson's attachments — editors and enrolled learners only.

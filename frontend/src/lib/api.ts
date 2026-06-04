@@ -364,6 +364,10 @@ export const api = {
       uploadMultipart<UploadedFile>("/courses/uploads/course-thumbnail", file, { courseId }, onProgress),
     uploadNodeAttachment: (nodeId: string, file: File, onProgress?: (percent: number) => void) =>
       uploadMultipart<NodeAttachment>("/courses/uploads/node-attachment", file, { nodeId }, onProgress),
+    // Inline image for rich-text fields (quiz prompts/options/explanations).
+    // Returns a permanent public URL; counts toward the creator's storage quota.
+    uploadRichImage: (file: File, nodeId?: string) =>
+      uploadMultipart<{ url: string; path: string; storage: string }>("/courses/uploads/rich-image", file, nodeId ? { nodeId } : undefined),
     nodeAttachments: (nodeId: string) => unwrap<NodeAttachment[]>(axiosClient().get(`/courses/nodes/${nodeId}/attachments`)),
     deleteUploadedAsset: (assetId: string) => unwrap<{ deleted: boolean }>(axiosClient().delete(`/courses/uploads/assets/${assetId}`)),
     // Content reports (course / lesson / comment)

@@ -6,6 +6,7 @@ import { CheckCircle2, ChevronLeft, History, Loader2, XCircle } from "lucide-rea
 import { api, type CourseNode, type QuizAttempt } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/utils";
+import { SafeHtml } from "@/components/common/SafeHtml";
 
 type Quiz = NonNullable<CourseNode["quiz_payload"]>;
 
@@ -73,21 +74,25 @@ export function QuizPanel({
           const isPicked = picked[q.id];
           return (
             <div key={q.id}>
-              <p className="font-medium">{qi + 1}. {q.prompt}</p>
+              <div className="flex gap-1.5 font-medium"><span>{qi + 1}.</span><SafeHtml html={q.prompt} className="flex-1" /></div>
               <div className="mt-2 space-y-1.5">
                 {q.options.map((opt, i) => (
-                  <button key={i} disabled={submitted} onClick={() => setPicked((p) => ({ ...p, [q.id]: i }))}
+                  <div key={i} role="button" tabIndex={submitted ? -1 : 0}
+                    onClick={() => { if (!submitted) setPicked((p) => ({ ...p, [q.id]: i })); }}
+                    onKeyDown={(e) => { if (!submitted && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setPicked((p) => ({ ...p, [q.id]: i })); } }}
                     className={cn(
-                      "block w-full rounded-xl border px-3 py-2 text-left text-sm transition",
+                      "flex w-full items-start gap-2 rounded-xl border px-3 py-2 text-left text-sm transition",
+                      submitted ? "cursor-default" : "cursor-pointer",
                       submitted && i === q.correctIndex ? "border-success bg-success/10" :
                       submitted && i === isPicked ? "border-danger bg-danger/10" :
                       isPicked === i ? "border-brand bg-surface-2" : "border-border bg-surface hover:bg-surface-2",
                     )}>
-                    <span className="mr-2 font-mono text-xs">{String.fromCharCode(65 + i)}.</span> {opt}
-                  </button>
+                    <span className="mt-0.5 font-mono text-xs">{String.fromCharCode(65 + i)}.</span>
+                    <SafeHtml html={opt} className="flex-1" />
+                  </div>
                 ))}
               </div>
-              {submitted && q.explanation && <p className="mt-2 text-xs text-fg-dim">{q.explanation}</p>}
+              {submitted && q.explanation && <div className="mt-2 text-xs text-fg-dim"><SafeHtml html={q.explanation} /></div>}
             </div>
           );
         })}
@@ -157,7 +162,7 @@ function ReviewPanel({ quiz, attempt, passingPercent, onBack }: { quiz: Quiz; at
           const pickedIndex = pickedByQuestion.get(q.id);
           return (
             <div key={q.id}>
-              <p className="font-medium">{qi + 1}. {q.prompt}</p>
+              <div className="flex gap-1.5 font-medium"><span>{qi + 1}.</span><SafeHtml html={q.prompt} className="flex-1" /></div>
               <div className="mt-2 space-y-1.5">
                 {q.options.map((opt, i) => {
                   const isCorrect = i === q.correctIndex;
@@ -165,11 +170,11 @@ function ReviewPanel({ quiz, attempt, passingPercent, onBack }: { quiz: Quiz; at
                   return (
                     <div key={i}
                       className={cn(
-                        "flex items-center justify-between rounded-xl border px-3 py-2 text-sm",
+                        "flex items-start justify-between gap-2 rounded-xl border px-3 py-2 text-sm",
                         isCorrect ? "border-success bg-success/10" : isPicked ? "border-danger bg-danger/10" : "border-border bg-surface",
                       )}>
-                      <span><span className="mr-2 font-mono text-xs">{String.fromCharCode(65 + i)}.</span> {opt}</span>
-                      <span className="flex items-center gap-2 text-xs">
+                      <span className="flex flex-1 items-start gap-2"><span className="mt-0.5 font-mono text-xs">{String.fromCharCode(65 + i)}.</span><SafeHtml html={opt} className="flex-1" /></span>
+                      <span className="flex shrink-0 items-center gap-2 text-xs">
                         {isPicked && <span className="text-fg-dim">Your answer</span>}
                         {isCorrect && <span className="text-success">Correct</span>}
                       </span>
@@ -177,7 +182,7 @@ function ReviewPanel({ quiz, attempt, passingPercent, onBack }: { quiz: Quiz; at
                   );
                 })}
               </div>
-              {q.explanation && <p className="mt-2 text-xs text-fg-dim">{q.explanation}</p>}
+              {q.explanation && <div className="mt-2 text-xs text-fg-dim"><SafeHtml html={q.explanation} /></div>}
             </div>
           );
         })}

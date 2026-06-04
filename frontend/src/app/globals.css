@@ -274,6 +274,29 @@ html.dark body {
 .markdown-view img { max-width: 100%; border-radius: 0.5rem; }
 .markdown-view .katex-display { margin: 0.9rem 0; overflow-x: auto; overflow-y: hidden; }
 
+/* ─── Rich text: quiz editor (TipTap) + rendered quiz HTML ─────────── */
+.rich-html { line-height: 1.55; word-wrap: break-word; }
+.rich-html p { margin: 0; }
+.rich-html p + p { margin-top: 0.45rem; }
+.rich-html ul { list-style: disc; padding-left: 1.25rem; margin: 0.3rem 0; }
+.rich-html ol { list-style: decimal; padding-left: 1.25rem; margin: 0.3rem 0; }
+.rich-html strong { font-weight: 700; }
+.rich-html em { font-style: italic; }
+.rich-html img, .rich-img { max-width: 100%; height: auto; border-radius: 0.5rem; margin: 0.4rem 0; display: block; }
+.rich-editor .tiptap { outline: none; }
+.rich-editor .tiptap > * + * { margin-top: 0.4rem; }
+.rich-editor .tiptap ul { list-style: disc; padding-left: 1.25rem; }
+.rich-editor .tiptap ol { list-style: decimal; padding-left: 1.25rem; }
+.rich-editor .tiptap img { max-width: 100%; height: auto; border-radius: 0.5rem; }
+.rich-editor .tiptap img.ProseMirror-selectednode { outline: 2px solid var(--brand-primary); }
+.rich-editor .tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-fg-dim);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
 /* ─── driver.js — creator onboarding tour ────────────────────────────
  * Override the library's default light-mode popover so it matches the
  * site's surface/border/fg tokens (works for both light + dark themes).

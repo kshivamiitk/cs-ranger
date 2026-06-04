@@ -8,6 +8,7 @@ import { api, type CourseNode, type VideoChapter, type VideoSubtitle } from "@/l
 import { composeStaticDoc, openStaticLessonInNewTab } from "@/lib/staticLesson";
 import { FileUpload } from "@/components/common/FileUpload";
 import { MarkdownView } from "@/components/common/MarkdownView";
+import { RichTextEditor } from "@/components/common/RichTextEditor";
 
 const Monaco = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
@@ -683,22 +684,31 @@ function QuizEditor({ value, onChange }: { value: Partial<CourseNode>; onChange:
       {questions.map((q, i) => (
         <div key={q.id} className="rounded-xl border border-border bg-surface-2 p-3">
           <div className="flex items-start gap-2">
-            <input value={q.prompt} onChange={(e) => updateQ(i, { prompt: e.target.value })} className="input flex-1" placeholder={`Question ${i + 1}`} />
-            <button onClick={() => removeQ(i)} className="text-fg-dim hover:text-danger"><Trash2 className="h-4 w-4" /></button>
+            <div className="flex-1">
+              <span className="mb-1 block text-xs text-fg-dim">Question {i + 1}</span>
+              <RichTextEditor value={q.prompt} onChange={(html) => updateQ(i, { prompt: html })} placeholder={`Question ${i + 1}`} nodeId={value.id} minHeight={44} />
+            </div>
+            <button onClick={() => removeQ(i)} className="mt-6 text-fg-dim hover:text-danger" title="Remove question"><Trash2 className="h-4 w-4" /></button>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          <p className="mt-3 text-xs text-fg-dim">Options — select the radio to mark the correct answer. Add images with the image button.</p>
+          <div className="mt-1.5 grid gap-2 md:grid-cols-2">
             {q.options.map((opt, oi) => (
-              <label key={oi} className={`flex items-center gap-2 rounded-lg border p-2 text-sm cursor-pointer ${q.correctIndex === oi ? "border-success bg-success/10" : "border-border"}`}>
-                <input type="radio" checked={q.correctIndex === oi} onChange={() => updateQ(i, { correctIndex: oi })} className="accent-success" />
-                <span className="font-mono text-xs">{String.fromCharCode(65 + oi)}.</span>
-                <input value={opt} onChange={(e) => {
-                  const opts = [...q.options]; opts[oi] = e.target.value;
-                  updateQ(i, { options: opts });
-                }} className="flex-1 bg-transparent outline-none" />
-              </label>
+              <div key={oi} className={`flex items-start gap-2 rounded-lg border p-2 ${q.correctIndex === oi ? "border-success bg-success/10" : "border-border"}`}>
+                <input type="radio" checked={q.correctIndex === oi} onChange={() => updateQ(i, { correctIndex: oi })} className="mt-2.5 accent-success" title="Mark as correct answer" />
+                <span className="mt-2 font-mono text-xs">{String.fromCharCode(65 + oi)}.</span>
+                <div className="flex-1">
+                  <RichTextEditor value={opt} onChange={(html) => {
+                    const opts = [...q.options]; opts[oi] = html;
+                    updateQ(i, { options: opts });
+                  }} placeholder={`Option ${String.fromCharCode(65 + oi)}`} nodeId={value.id} minHeight={30} />
+                </div>
+              </div>
             ))}
           </div>
-          <textarea rows={2} value={q.explanation || ""} onChange={(e) => updateQ(i, { explanation: e.target.value })} placeholder="Explanation (shown after answer)" className="input mt-2 text-xs" />
+          <div className="mt-2">
+            <span className="mb-1 block text-xs text-fg-dim">Explanation (shown after answer)</span>
+            <RichTextEditor value={q.explanation || ""} onChange={(html) => updateQ(i, { explanation: html })} placeholder="Explain why the correct answer is right…" nodeId={value.id} minHeight={36} />
+          </div>
         </div>
       ))}
       <button onClick={addQuestion} className="btn-ghost w-full text-sm"><Plus className="h-4 w-4" /> Add question</button>
