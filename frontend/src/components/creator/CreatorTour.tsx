@@ -50,7 +50,7 @@ const STEPS: TourStep[] = [
     element: "[data-tour='nav-finance']",
     title: "Step 3 — Finance & payouts",
     description:
-      "Every sale shows up here. 80% lands in your wallet, 20% is the platform commission. After KYC, you can withdraw to your bank. Refunds (7-day window) are auto-deducted.",
+      "Every sale shows up here — your share lands in your wallet after the platform commission is deducted (the exact split is shown on this page). After KYC, you can withdraw to your bank. Refunds (7-day window) are auto-deducted.",
   },
   {
     route: "/creator/overview",

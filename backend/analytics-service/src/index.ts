@@ -1,4 +1,4 @@
-import { createService, ok, fail, requireAuth, requireRole, withDb } from "@cs-ranger/shared";
+import { createService, ok, fail, requireAuth, requireRole, withDb, getPlatformSetting } from "@cs-ranger/shared";
 
 const { app, listen } = createService("analytics-service");
 const PORT = Number(process.env.PORT_ANALYTICS || 4012);
@@ -241,6 +241,10 @@ app.get("/admin/overview", requireRole("admin"), async (_req, res) => {
 app.get("/admin/revenue", requireRole("admin"), async (_req, res) => {
   const data = await cached("admin-revenue", 5 * 60 * 1000, async () =>
     withDb(async (db) => {
+      // Commission rate comes from the live platform setting (admin-editable,
+      // falls back to PLATFORM_COMMISSION_RATE) so this report matches what
+      // creators are actually charged — never a hardcoded percentage.
+      const commissionRate = await getPlatformSetting("commission_rate", Number(process.env.PLATFORM_COMMISSION_RATE || 0.15));
       const since = new Date(); since.setMonth(since.getMonth() - 11); since.setDate(1);
       const { data } = await db.from("payments").select("amount, created_at").eq("status", "success").gte("created_at", since.toISOString());
       const buckets = new Map<string, number>();
@@ -248,7 +252,7 @@ app.get("/admin/revenue", requireRole("admin"), async (_req, res) => {
         const k = p.created_at?.slice(0, 7) || "?";
         buckets.set(k, (buckets.get(k) || 0) + (p.amount || 0));
       }
-      return Array.from(buckets.entries()).sort().map(([month, revenue]) => ({ month, revenue, commission: Math.floor(revenue * 0.15) }));
+      return Array.from(buckets.entries()).sort().map(([month, revenue]) => ({ month, revenue, commission: Math.floor(revenue * commissionRate) }));
     }, () => [])
   );
   ok(res, data);

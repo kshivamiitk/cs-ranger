@@ -157,6 +157,32 @@ app.get("/me/feed", requireAuth, async (req, res) => {
   ok(res, result.items, { page, pageSize, total: result.total });
 });
 
+// Public platform settings — non-sensitive values the marketing pages and
+// creator UI need (commission %, TDS %, payout threshold). No auth on purpose:
+// these render on the public landing page. Sourced from the live, admin-editable
+// platform_settings with env fallbacks, so every UI label matches what creators
+// are actually charged — no hardcoded percentages anywhere on the client.
+app.get("/settings/public", async (_req, res) => {
+  const [commissionRate, tdsRate, minPayoutInr, refundWindowDays, siteName] = await Promise.all([
+    getPlatformSetting("commission_rate", Number(process.env.PLATFORM_COMMISSION_RATE || 0.15)),
+    getPlatformSetting("tds_rate", Number(process.env.PLATFORM_TDS_RATE || 0.10)),
+    getPlatformSetting("min_payout_inr", Number(process.env.PLATFORM_MIN_PAYOUT_INR || 500)),
+    getPlatformSetting("refund_window_days", Number(process.env.PLATFORM_REFUND_WINDOW_DAYS || 7)),
+    getPlatformSetting("site_name", process.env.NEXT_PUBLIC_SITE_NAME || "LearnRift"),
+  ]);
+  const rate = Number(commissionRate);
+  ok(res, {
+    commissionRate: rate,
+    commissionPercent: Math.round(rate * 100),
+    creatorSharePercent: Math.round((1 - rate) * 100),
+    tdsRate: Number(tdsRate),
+    tdsPercent: Math.round(Number(tdsRate) * 100),
+    minPayoutInr: Number(minPayoutInr),
+    refundWindowDays: Number(refundWindowDays),
+    siteName: String(siteName),
+  });
+});
+
 // Creator T&C status — drives the acceptance modal and the submit-for-review gate.
 app.get("/me/creator-terms-status", requireAuth, async (req, res) => {
   const [currentVersion, commissionRate] = await Promise.all([

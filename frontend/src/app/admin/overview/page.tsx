@@ -8,12 +8,14 @@ import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { api } from "@/lib/api";
 import { formatINR } from "@/lib/utils";
+import { usePublicSettings } from "@/hooks/usePublicSettings";
 
 export default function AdminOverviewPage() {
   const qc = useQueryClient();
   const { data: kpis } = useQuery({ queryKey: ["admin-overview"], queryFn: () => api.analytics.adminOverview() });
   const { data: revenue } = useQuery({ queryKey: ["admin-revenue"], queryFn: () => api.analytics.adminRevenue() });
   const { data: reviewQueue } = useQuery({ queryKey: ["admin-review-queue"], queryFn: () => api.courses.adminList({ status: "under_review" }) });
+  const platform = usePublicSettings();
 
   const approve = useMutation({ mutationFn: (id: string) => api.courses.approve(id), onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-review-queue"] }) });
   const reject = useMutation({ mutationFn: ({ id, reason }: { id: string; reason: string }) => api.courses.reject(id, reason), onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-review-queue"] }) });
@@ -29,7 +31,7 @@ export default function AdminOverviewPage() {
           <KPI icon={<Users className="h-5 w-5 text-success" />} label="Total users" value={String(kpis?.totalUsers ?? 0)} delta={`+${kpis?.newSignupsWeek ?? 0} this week`} />
           <KPI icon={<BookOpen className="h-5 w-5 text-brand-accent" />} label="Active courses" value={String(kpis?.totalCourses ?? 0)} delta={`${kpis?.coursesUnderReview ?? 0} under review`} />
           <KPI icon={<Wallet className="h-5 w-5 text-brand" />} label="Revenue (30d)" value={formatINR((kpis?.totalRevenue30d ?? 0) / 100)} delta="paise → ₹" />
-          <KPI icon={<Activity className="h-5 w-5 text-amber-400" />} label="Commission earned" value={formatINR((kpis?.commissionEarned ?? 0) / 100)} delta="Commission: 15%" />
+          <KPI icon={<Activity className="h-5 w-5 text-amber-400" />} label="Commission earned" value={formatINR((kpis?.commissionEarned ?? 0) / 100)} delta={`Commission: ${platform.commissionPercent}%`} />
         </section>
 
         <section className="mt-8 card">

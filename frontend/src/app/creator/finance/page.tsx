@@ -8,11 +8,13 @@ import { Footer } from "@/components/common/Footer";
 import { api } from "@/lib/api";
 import { useApp } from "@/app/providers";
 import { formatINR, saveBlob } from "@/lib/utils";
+import { usePublicSettings } from "@/hooks/usePublicSettings";
 
 export default function CreatorFinancePage() {
   const { user } = useApp();
   const qc = useQueryClient();
   const creatorId = user?.user_id || user?.id;
+  const platform = usePublicSettings();
 
   const { data: balance } = useQuery({ queryKey: ["balance", creatorId], queryFn: () => api.wallet.balance(creatorId!), enabled: !!creatorId });
   const { data: ledger } = useQuery({ queryKey: ["ledger", creatorId], queryFn: () => api.wallet.ledger(creatorId!), enabled: !!creatorId });
@@ -55,7 +57,7 @@ export default function CreatorFinancePage() {
         <section className="mt-6 grid gap-4 sm:grid-cols-4">
           <Stat label="Pending balance" value={formatINR((balance?.pending ?? 0) / 100)} highlight />
           <Stat label="Lifetime earnings" value={formatINR((balance?.total_earned ?? 0) / 100)} />
-          <Stat label="Platform fee (15%)" value={formatINR((balance?.total_commission ?? 0) / 100)} muted />
+          <Stat label={`Platform fee (${platform.commissionPercent}%)`} value={formatINR((balance?.total_commission ?? 0) / 100)} muted />
           <Stat label="Lifetime payouts" value={formatINR((balance?.total_paid_out ?? 0) / 100)} muted />
         </section>
 

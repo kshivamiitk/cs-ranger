@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { CommissionPct } from "@/components/common/PlatformRates";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { SITE_NAME } from "@/lib/utils";
@@ -42,7 +43,7 @@ export default function CreatorTermsPage() {
             creator earnings.
           </p>
           <p>
-            <strong>Initial platform commission: 20%.</strong>
+            <strong>Current platform commission: <CommissionPct />%.</strong>
           </p>
 
           <h2>5. Payouts</h2>

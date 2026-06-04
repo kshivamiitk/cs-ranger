@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
+import { CommissionPct, CreatorSharePct } from "@/components/common/PlatformRates";
 
 export const metadata = { title: "Creator Guide · LearnRift" };
 
@@ -131,7 +132,7 @@ export default function CreatorGuidePage() {
           <div className="card">
             <h3 className="heading-3 flex items-center gap-2"><IndianRupee className="h-5 w-5 text-brand" /> Pricing, payouts &amp; refunds</h3>
             <ul className="mt-3 space-y-2 text-sm text-fg-dim">
-              <li>You keep <strong className="text-fg">80%</strong> of every sale; the platform commission is 20%.</li>
+              <li>You keep <strong className="text-fg"><CreatorSharePct />%</strong> of every sale; the platform commission is <CommissionPct />%.</li>
               <li>A discounted price, if set, must be lower than the full price.</li>
               <li>Earnings land in your wallet — withdraw to your bank after completing KYC.</li>
               <li>Refunds have a 7-day window and are automatically deducted from your balance.</li>

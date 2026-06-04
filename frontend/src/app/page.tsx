@@ -8,7 +8,8 @@ import { Footer } from "@/components/common/Footer";
 import { CourseCard } from "@/components/common/CourseCard";
 import { Avatar } from "@/components/common/Avatar";
 import { api } from "@/lib/api";
-import { SITE_NAME, avatarUrl, formatCompact } from "@/lib/utils";
+import { SITE_NAME, avatarUrl, formatCompact, formatINR } from "@/lib/utils";
+import { usePublicSettings } from "@/hooks/usePublicSettings";
 
 export default function LandingPage() {
   const { data: featured } = useQuery({ queryKey: ["featured-courses"], queryFn: () => api.search.courses({ sort: "popular", limit: 8 }) });
@@ -16,6 +17,13 @@ export default function LandingPage() {
 
   const featuredList = (featured?.items || []).slice(0, 8);
   const featuredCreators = (creators || []).slice(0, 4);
+
+  // Live platform rate drives the pricing copy + the worked example below, so
+  // the landing page never disagrees with what creators are actually charged.
+  const platform = usePublicSettings();
+  const exGross = 999 * 100; // 100 enrollments at ₹999
+  const exFee = Math.round(exGross * platform.commissionRate);
+  const exPayout = exGross - exFee;
 
   return (
     <>
@@ -141,7 +149,7 @@ export default function LandingPage() {
             <div className="grid gap-10 md:grid-cols-2">
               <div>
                 <span className="chip">For creators</span>
-                <h2 className="mt-3 heading-2">You set the price. <span className="gradient-text">We take 15%</span>. You keep the rest.</h2>
+                <h2 className="mt-3 heading-2">You set the price. <span className="gradient-text">We take {platform.commissionPercent}%</span>. You keep the rest.</h2>
                 <p className="mt-4 text-fg-dim">No subscription fees. No revenue thresholds. Razorpay payouts hit your bank or UPI directly, after KYC.</p>
                 <div className="mt-6 space-y-2.5">
                   {["No upfront cost to publish", "Free hosting on YouTube & Google Drive", "TDS handled automatically", "Quarterly tax certificates", "Real-time analytics on every lesson"].map((p) => (
@@ -158,14 +166,14 @@ export default function LandingPage() {
               <div className="card relative overflow-hidden p-8">
                 <div className="absolute -right-12 -top-12 h-48 w-48 rounded-full bg-brand-gradient opacity-20 blur-3xl" />
                 <p className="text-xs uppercase tracking-widest text-fg-dim">Example payout</p>
-                <p className="mt-2 font-display text-5xl font-bold gradient-text">₹85,000</p>
+                <p className="mt-2 font-display text-5xl font-bold gradient-text">{formatINR(exPayout)}</p>
                 <p className="mt-1 text-sm text-fg-dim">For 100 enrollments at ₹999, after platform fee.</p>
                 <div className="mt-8 space-y-3 text-sm">
-                  <Row label="Gross revenue" value="₹99,900" />
-                  <Row label="Platform fee (15%)" value="−₹14,985" muted />
+                  <Row label="Gross revenue" value={formatINR(exGross)} />
+                  <Row label={`Platform fee (${platform.commissionPercent}%)`} value={`−${formatINR(exFee)}`} muted />
                   <Row label="TDS (auto-handled)" value="−₹—" muted />
                   <div className="my-3 h-px bg-border" />
-                  <Row label="Your payout" value="₹84,915" bold />
+                  <Row label="Your payout" value={formatINR(exPayout)} bold />
                 </div>
               </div>
             </div>

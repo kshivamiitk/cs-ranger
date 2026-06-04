@@ -7,8 +7,12 @@ import { randomBytes, createHash } from "node:crypto";
 const { app, listen, log } = createService("auth-service");
 const PORT = Number(process.env.PORT_AUTH || 4001);
 
-const ACCESS_TTL  = process.env.JWT_ACCESS_TTL  || "15m";
-const REFRESH_TTL_DAYS = 30;
+const ACCESS_TTL  = process.env.JWT_ACCESS_TTL  || "30m";
+// Long-lived refresh so "remember me" sticks for months. Rotated on every
+// refresh (see /refresh), and the access token is refreshed proactively on the
+// client, so a returning user stays logged in unless they're away this long or
+// clear their browser storage.
+const REFRESH_TTL_DAYS = Number(process.env.JWT_REFRESH_TTL_DAYS || 180);
 // In production this throws if JWT_SECRET is missing/placeholder/short; in dev it
 // returns the shared dev fallback. Must match api-gateway's verification secret.
 const JWT_SECRET = requireJwtSecret();

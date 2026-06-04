@@ -22,6 +22,63 @@ function logTiming(config: TimedConfig | undefined, status: number) {
   console[ms > 500 ? "warn" : "debug"](label);
 }
 
+// --- Token persistence + refresh ---------------------------------------------
+// localStorage is persistent browser storage (survives tab/browser restarts),
+// so combined with the long refresh-token TTL this keeps the user logged in for
+// months without re-entering credentials.
+function getAccessToken(): string | null {
+  return typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+}
+function getRefreshToken(): string | null {
+  return typeof window !== "undefined" ? localStorage.getItem("refresh_token") : null;
+}
+function setAuthTokens(access: string, refresh: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("access_token", access);
+  localStorage.setItem("refresh_token", refresh);
+}
+function clearAuthTokens(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+}
+// Unix-seconds `exp` from a JWT payload, or 0 if it can't be parsed.
+function tokenExpiry(token: string): number {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1] || ""));
+    return typeof payload?.exp === "number" ? payload.exp : 0;
+  } catch {
+    return 0;
+  }
+}
+// A single in-flight refresh shared by the proactive (pre-request) and reactive
+// (401) paths, so concurrent requests never double-rotate the refresh token.
+// Uses bare axios so it can't recurse through the interceptors. Returns the new
+// access token, or null when there's nothing to refresh with / it failed.
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+  if (isRefreshing) {
+    return new Promise<string | null>((resolve) => refreshWaiters.push(resolve));
+  }
+  isRefreshing = true;
+  try {
+    const r = await axios.post(`${API_URL}/auth/refresh`, { refreshToken });
+    const newAccess = r.data?.data?.accessToken as string;
+    const newRefresh = r.data?.data?.refreshToken as string;
+    setAuthTokens(newAccess, newRefresh);
+    refreshWaiters.forEach((w) => w(newAccess));
+    refreshWaiters = [];
+    return newAccess;
+  } catch {
+    refreshWaiters.forEach((w) => w(null));
+    refreshWaiters = [];
+    return null;
+  } finally {
+    isRefreshing = false;
+  }
+}
+
 function axiosClient(): AxiosInstance {
   if (_axios) return _axios;
   _axios = axios.create({
@@ -33,9 +90,19 @@ function axiosClient(): AxiosInstance {
     timeout: 45000,
   });
 
-  _axios.interceptors.request.use((config) => {
+  _axios.interceptors.request.use(async (config) => {
     if (typeof window !== "undefined") {
-      const token = localStorage.getItem("access_token");
+      let token = getAccessToken();
+      // Proactive refresh: renew BEFORE sending when the access token has <60s
+      // left, so the user never hits a 401 → /login bounce mid-session. If the
+      // refresh fails we fall through with the old token; the 401 handler below
+      // is the safety net.
+      if (token) {
+        const exp = tokenExpiry(token);
+        if (exp > 0 && exp * 1000 - Date.now() < 60_000 && getRefreshToken()) {
+          token = (await refreshAccessToken()) ?? token;
+        }
+      }
       if (token) config.headers.Authorization = `Bearer ${token}`;
     }
     if (IS_DEV) (config as TimedConfig).metadata = { start: performance.now() };
@@ -52,38 +119,16 @@ function axiosClient(): AxiosInstance {
       const original = error.config as AxiosError["config"] & { _retry?: boolean };
       if (error.response?.status === 401 && !original?._retry && typeof window !== "undefined") {
         original!._retry = true;
-        const refreshToken = localStorage.getItem("refresh_token");
-        if (!refreshToken) {
+        const newAccess = await refreshAccessToken();
+        if (!newAccess) {
+          // Nothing to refresh with, or the refresh token is expired/revoked →
+          // a genuine logout. Guard the redirect so we don't loop on /login.
+          clearAuthTokens();
+          if (!window.location.pathname.startsWith("/login")) window.location.href = "/login";
           return Promise.reject(error);
         }
-        if (isRefreshing) {
-          return new Promise<string | null>((resolve) => refreshWaiters.push(resolve)).then((token) => {
-            if (!token) return Promise.reject(error);
-            original!.headers!.Authorization = `Bearer ${token}`;
-            return _axios!.request(original!);
-          });
-        }
-        isRefreshing = true;
-        try {
-          const r = await axios.post(`${API_URL}/auth/refresh`, { refreshToken });
-          const newAccess = r.data?.data?.accessToken as string;
-          const newRefresh = r.data?.data?.refreshToken as string;
-          localStorage.setItem("access_token", newAccess);
-          localStorage.setItem("refresh_token", newRefresh);
-          refreshWaiters.forEach((w) => w(newAccess));
-          refreshWaiters = [];
-          original!.headers!.Authorization = `Bearer ${newAccess}`;
-          return _axios!.request(original!);
-        } catch {
-          refreshWaiters.forEach((w) => w(null));
-          refreshWaiters = [];
-          localStorage.removeItem("access_token");
-          localStorage.removeItem("refresh_token");
-          window.location.href = "/login";
-          return Promise.reject(error);
-        } finally {
-          isRefreshing = false;
-        }
+        original!.headers!.Authorization = `Bearer ${newAccess}`;
+        return _axios!.request(original!);
       }
       return Promise.reject(error);
     },
@@ -197,6 +242,10 @@ export const api = {
     acceptCreatorTerms: (termsVersion: string, commissionRate: number) =>
       unwrap<{ accepted: boolean }>(axiosClient().post("/users/me/accept-creator-terms", { termsVersion, commissionRate })),
     creatorTermsStatus: () => unwrap<CreatorTermsStatus>(axiosClient().get("/users/me/creator-terms-status")),
+    // Public, unauthenticated platform settings (commission %, TDS %, payout
+    // threshold) so UI labels reflect the live, admin-editable rate instead of
+    // hardcoded numbers.
+    publicSettings: () => unwrap<{ commissionRate: number; commissionPercent: number; creatorSharePercent: number; tdsRate: number; tdsPercent: number; minPayoutInr: number; refundWindowDays: number; siteName: string }>(axiosClient().get("/users/settings/public")),
     // Resumable onboarding wizard
     onboarding: () => unwrap<OnboardingState>(axiosClient().get("/users/me/onboarding")),
     updateOnboarding: (b: OnboardingPatchBody) => unwrap<{ saved: boolean }>(axiosClient().patch("/users/me/onboarding", b)),
