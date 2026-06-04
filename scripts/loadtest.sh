@@ -6,18 +6,18 @@
 #
 # Defaults: ramp = 50 → 250 → 500 → 1000 concurrent, 30s per stage, target
 # /api/search/courses?sort=popular&limit=8 (the home-page call). The loadgen
-# runs ON the EC2 box (so we measure the actual server, not the home internet
-# RTT) and rotates X-Forwarded-For per request so the gateway's per-IP rate
-# limiter doesn't trip.
+# runs ON the production VM (so we measure the actual server, not the home
+# internet RTT) and rotates X-Forwarded-For per request so the gateway's per-IP
+# rate limiter doesn't trip.
 #
 # Usage:
 #   scripts/loadtest.sh
 #   scripts/loadtest.sh --stages "10,50,200" --duration 20 --path "/api/search/creators?limit=8"
-#   PEM=~/path/to/key.pem HOST=ubuntu@1.2.3.4 scripts/loadtest.sh
+#   PEM=~/path/to/key HOST=user@host scripts/loadtest.sh
 #
 # Env / flags:
-#   PEM        path to the EC2 SSH key (default: ~/Downloads/cs-ranger-prod-1.pem)
-#   HOST       user@ip of the box (default: ubuntu@15.207.10.3)
+#   PEM        path to the SSH key for the box (default: ~/.ssh/cs-ranger-deploy)
+#   HOST       user@host of the box (default: kumarshivamiitkcse@learnrift.site)
 #   --stages   comma-separated concurrency tiers (default: 50,250,500,1000)
 #   --duration seconds per stage (default: 30)
 #   --path     URL path to hit (default: /api/search/courses?sort=popular&limit=8)
@@ -25,8 +25,8 @@
 #
 set -euo pipefail
 
-PEM="${PEM:-$HOME/Downloads/cs-ranger-prod-1.pem}"
-HOST="${HOST:-ubuntu@15.207.10.3}"
+PEM="${PEM:-$HOME/.ssh/cs-ranger-deploy}"
+HOST="${HOST:-kumarshivamiitkcse@learnrift.site}"
 STAGES="50,250,500,1000"
 DURATION=30
 TARGET_PATH="/api/search/courses?sort=popular&limit=8"
@@ -163,7 +163,7 @@ echo "================================================================"
 echo " CONTROL: same final concurrency hitting search-service directly"
 echo " (bypasses gateway — tells us how much of the cost is the proxy)"
 echo "================================================================"
-FINAL_C="${STAGE_ARR[-1]// /}"
+FINAL_C="${STAGE_ARR[$((${#STAGE_ARR[@]} - 1))]// /}"  # last element; macOS bash 3.2 has no [-1]
 $SSH "$HOST" "cat > /tmp/loadgen_direct.mjs" <<'NODE_DIRECT'
 import http from 'node:http'; import { performance } from 'node:perf_hooks';
 const C = parseInt(process.env.C||'1000'), D = parseInt(process.env.D||'30');
