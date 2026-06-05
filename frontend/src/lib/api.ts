@@ -380,6 +380,12 @@ export const api = {
     bookmarkNode: (nodeId: string) => unwrap<{ bookmarked: boolean }>(axiosClient().post(`/courses/nodes/${nodeId}/bookmark`, {})),
     unbookmarkNode: (nodeId: string) => unwrap<{ bookmarked: boolean }>(axiosClient().delete(`/courses/nodes/${nodeId}/bookmark`)),
     categories: () => unwrap<Category[]>(axiosClient().get("/courses/categories")),
+    createCategory: (b: { name: string; slug?: string; icon?: string; position?: number }) =>
+      unwrap<Category>(axiosClient().post("/courses/categories", b)),
+    updateCategory: (id: string, b: { name?: string; slug?: string; icon?: string; position?: number }) =>
+      unwrap<Category>(axiosClient().patch(`/courses/categories/${id}`, b)),
+    deleteCategory: (id: string) =>
+      unwrap<{ deleted: boolean }>(axiosClient().delete(`/courses/categories/${id}`)),
   },
 
   // Enrollments

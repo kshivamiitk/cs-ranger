@@ -183,6 +183,62 @@ app.get("/categories", async (_req, res) => {
   ok(res, list);
 });
 
+// Admin category management. (RLS also restricts writes to admins; this is the
+// missing CRUD that left the admin "Categories" page unable to add anything.)
+const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+const CategoryWrite = z.object({
+  name: z.string().min(1).max(60),
+  slug: z.string().min(1).max(60).regex(/^[a-z0-9-]+$/, "slug: lowercase letters, numbers and hyphens only").optional(),
+  icon: z.string().max(16).optional(),
+  position: z.number().int().min(0).optional(),
+});
+
+app.post("/categories", requireRole("admin"), async (req, res) => {
+  const parsed = CategoryWrite.safeParse(req.body);
+  if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message, "VALIDATION");
+  const name = parsed.data.name.trim();
+  const slug = parsed.data.slug || slugify(name);
+  if (!slug) return fail(res, 400, "Could not derive a slug from the name", "VALIDATION");
+  const result = await withDb(async (db) => {
+    const { data, error } = await db.from("categories")
+      .insert({ name, slug, icon: parsed.data.icon || null, position: parsed.data.position ?? 0 })
+      .select("*").single();
+    if (error) throw error;
+    return data;
+  }, null);
+  if (!result) return fail(res, 409, "A category with that name or slug already exists", "DUPLICATE");
+  res.status(201);
+  ok(res, result);
+});
+
+app.patch("/categories/:id", requireRole("admin"), async (req, res) => {
+  const parsed = CategoryWrite.partial().safeParse(req.body);
+  if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message, "VALIDATION");
+  const patch: Record<string, unknown> = {};
+  if (parsed.data.name !== undefined) patch.name = parsed.data.name.trim();
+  if (parsed.data.slug !== undefined) patch.slug = parsed.data.slug;
+  if (parsed.data.icon !== undefined) patch.icon = parsed.data.icon || null;
+  if (parsed.data.position !== undefined) patch.position = parsed.data.position;
+  if (Object.keys(patch).length === 0) return fail(res, 400, "Nothing to update", "VALIDATION");
+  const result = await withDb(async (db) => {
+    const { data, error } = await db.from("categories").update(patch).eq("id", req.params.id).select("*").single();
+    if (error) throw error;
+    return data;
+  }, null);
+  if (!result) return fail(res, 404, "Category not found, or the name/slug is taken", "NOT_FOUND");
+  ok(res, result);
+});
+
+app.delete("/categories/:id", requireRole("admin"), async (req, res) => {
+  // courses.category_id is ON DELETE SET NULL, so affected courses are simply
+  // uncategorized — no course data is lost.
+  await withDb(async (db) => {
+    await db.from("categories").delete().eq("id", req.params.id);
+    return null;
+  }, null);
+  ok(res, { deleted: true });
+});
+
 // ─── Course listing (catalog) ────────────────────────────────────
 app.get("/", async (req, res) => {
   const page = Math.max(1, Number(req.query.page || 1));
