@@ -1,4 +1,4 @@
-import { createService, ok, fail, paginate, mock, requireAuth, requireRole, withDb, isSupabaseConfigured, publish, Topics, bustPrefix, razorpay, isRazorpayConfigured, verifyPaymentSignature, sendRealtimeNotification, writeAuditLog, getPlatformSetting, type Course } from "@cs-ranger/shared";
+import { createService, ok, fail, paginate, mock, requireAuth, requireRole, withDb, isSupabaseConfigured, publish, Topics, bustPrefix, withCache, razorpay, isRazorpayConfigured, verifyPaymentSignature, sendRealtimeNotification, writeAuditLog, getPlatformSetting, type Course } from "@cs-ranger/shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Request as ExpressRequest } from "express";
 import { z } from "zod";
@@ -305,10 +305,16 @@ app.get("/admin/courses", requireRole("admin"), async (req, res) => {
 
 // ─── Aggregated course detail ────────────────────────────────────
 app.get("/:id/detail", async (req, res) => {
+  const id = req.params.id;
+  // Cache the public detail aggregate for 30s. It's the heaviest public read
+  // (course + modules + nodes + creator + reviews) and uncached it ran ~1s; under
+  // a browse spike, 500 concurrent hits on a popular course collapse to one DB
+  // read per 30s. Edits show within 30s — same eventual-consistency model as the
+  // catalog/search caches. withCache fails open (direct compute) if Redis is down.
   // Loose generic: DB rows and the dev mock differ in nullability; the handler
   // only null-checks and forwards the aggregate.
-  const aggregated = await withDb<{ course: unknown; creator: unknown; reviews: unknown } | null>(async (db) => {
-    const { data: course } = await db.from("courses").select("*").eq("id", req.params.id).maybeSingle();
+  const aggregated = await withCache(`course:detail:${id}`, 30, () => withDb<{ course: unknown; creator: unknown; reviews: unknown } | null>(async (db) => {
+    const { data: course } = await db.from("courses").select("*").eq("id", id).maybeSingle();
     if (!course) return null;
     // Curriculum OUTLINE only — the public course page renders lesson titles/types/durations,
     // not lesson bodies. Selecting explicit node columns (instead of nodes(*)) keeps heavy
@@ -324,11 +330,11 @@ app.get("/:id/detail", async (req, res) => {
     // position so the public curriculum matches the creator's saved order.
     return { course: { ...course, modules: sortCourseTree(modules) }, creator, reviews };
   }, () => {
-    const c = mock.courses.find((x) => x.id === req.params.id);
+    const c = mock.courses.find((x) => x.id === id);
     if (!c) return null;
     const creator = mock.users.find((u) => u.id === c.creatorId);
     return { course: c, creator, reviews: mock.reviews.filter((r) => r.courseId === c.id) };
-  });
+  }));
   if (!aggregated) return fail(res, 404, "Course not found", "NOT_FOUND");
   ok(res, aggregated);
 });
