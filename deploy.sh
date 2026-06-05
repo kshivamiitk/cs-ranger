@@ -66,14 +66,12 @@ node -v
 npm -v
 pm2 -v
 
-# This is a one-VM deployment. Stop the app before install/build so a small
-# e2-small/e2-medium instance does not build Next.js while all services are
-# already consuming RAM. This intentionally causes short deploy downtime.
-log "stop existing pm2 entries for this app"
-for app in "${APP_NAMES[@]}"; do
-  pm2 delete "$app" >/dev/null 2>&1 || true
-done
-
+# Low-downtime deploy: keep the running services UP during install + build (the
+# 16 GB VM has ample headroom), then gracefully reload them at the end. Two wins:
+#   * No full-stop outage for the whole npm ci + Next build window (the old
+#     behaviour, which read as "the site keeps crashing" on every deploy).
+#   * A failed build leaves the CURRENT site running untouched — a bad deploy no
+#     longer takes production down; it just aborts before the reload.
 if command -v free >/dev/null 2>&1; then
   log "memory before install/build"
   free -h
@@ -103,11 +101,14 @@ if [[ "${NEXT_PUBLIC_API_URL:-}" =~ localhost|127\.0\.0\.1|0\.0\.0\.0 ]]; then
 fi
 
 log "build frontend"
-rm -rf frontend/.next
+# Keep the previous .next in place during the build so the still-running
+# `next start` isn't disrupted; next build overwrites it. (No rm -rf.)
 npm --prefix frontend run build
 
-log "start pm2 ecosystem"
-pm2 start ecosystem.config.cjs --update-env
+log "reload pm2 ecosystem (graceful: starts new apps, reloads running ones)"
+# startOrReload reloads in place instead of delete+start — services that are
+# already up restart one at a time rather than all going down together.
+pm2 startOrReload ecosystem.config.cjs --update-env
 
 log "wait for frontend"
 FRONTEND_OK=0

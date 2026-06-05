@@ -24,7 +24,9 @@ module.exports = {
       env: {
         NODE_ENV: "production",
       },
-      max_memory_restart: "768M",
+      // 16 GB VM — give Next.js real headroom so a busy (not leaking) process
+      // isn't killed-and-restarted mid-request (which looked like a "crash").
+      max_memory_restart: "1536M",
       time: true,
     },
     ...backendServices.map(([name, workspace]) => ({
@@ -35,7 +37,7 @@ module.exports = {
       env: {
         NODE_ENV: "production",
       },
-      max_memory_restart: "256M",
+      max_memory_restart: "512M",
       time: true,
     })),
   ],

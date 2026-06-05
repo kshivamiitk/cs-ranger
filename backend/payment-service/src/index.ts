@@ -133,19 +133,28 @@ app.post("/create-order", requireAuth, async (req, res) => {
     });
   }
 
-  // 3. Create Razorpay order (or stub in dev)
-  let orderId: string;
+  // 3. Create Razorpay order (or stub in dev). Retry a few times — most
+  // "payment gateway 502"s are transient Razorpay API blips/timeouts, and a
+  // single failure shouldn't cost a sale.
+  let orderId = "";
   if (isRazorpayConfigured()) {
-    try {
-      const order = await razorpay().orders.create({
-        amount: amountPaise,
-        currency: "INR",
-        receipt: `enr_${courseId}_${req.user!.id}_${Date.now()}`.slice(0, 40),
-        notes: { learnerId: req.user!.id, courseId, courseTitle: course.title || "" },
-      });
-      orderId = order.id;
-    } catch (e) {
-      log.error("razorpay create order failed", { err: e instanceof Error ? e.message : String(e) });
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= 3 && !orderId; attempt++) {
+      try {
+        const order = await razorpay().orders.create({
+          amount: amountPaise,
+          currency: "INR",
+          receipt: `enr_${courseId}_${req.user!.id}_${Date.now()}`.slice(0, 40),
+          notes: { learnerId: req.user!.id, courseId, courseTitle: course.title || "" },
+        });
+        orderId = order.id;
+      } catch (e) {
+        lastErr = e;
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 300 * attempt));
+      }
+    }
+    if (!orderId) {
+      log.error("razorpay create order failed after 3 attempts", { err: lastErr instanceof Error ? lastErr.message : String(lastErr) });
       return fail(res, 502, "Payment gateway error", "GATEWAY_ERROR");
     }
   } else {
