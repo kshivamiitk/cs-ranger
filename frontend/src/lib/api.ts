@@ -403,8 +403,10 @@ export const api = {
     getWatchPosition: (nodeId: string) => unwrap<{ seconds: number; completed: boolean }>(axiosClient().get(`/enrollments/progress/${nodeId}/watch-position`)),
     courseProgress: (courseId: string) => unwrap<{ enrollment: Enrollment | null; completedNodeIds: string[] }>(axiosClient().get(`/enrollments/${courseId}/progress`)),
     submitQuiz: (nodeId: string, answers: { questionId: string; pickedIndex: number }[]) =>
-      unwrap<{ score: number; max: number; passed: boolean; attemptId?: string; courseProgressPercent?: number; courseCompleted?: boolean; courseJustCompleted?: boolean }>(axiosClient().post(`/enrollments/quiz/${nodeId}/attempt`, { answers })),
-    quizAttempts: (nodeId: string) => unwrap<QuizAttempt[]>(axiosClient().get(`/enrollments/quiz/${nodeId}/attempts`)),
+      unwrap<{ score: number; max: number; passed: boolean; attemptId?: string; answerKey?: QuizAnswerKey; courseProgressPercent?: number; courseCompleted?: boolean; courseJustCompleted?: boolean }>(axiosClient().post(`/enrollments/quiz/${nodeId}/attempt`, { answers })),
+    // Returns the learner's attempts plus the answer key (only populated once they
+    // have an attempt) — the key is no longer embedded in the course content.
+    quizAttempts: (nodeId: string) => unwrap<{ attempts: QuizAttempt[]; answerKey: QuizAnswerKey }>(axiosClient().get(`/enrollments/quiz/${nodeId}/attempts`)),
     notes: (nodeId: string) => unwrap<{ id: string; body: string; timestamp_s: number }[]>(axiosClient().get(`/enrollments/notes/${nodeId}`)),
     addNote: (nodeId: string, body: string, timestamp_s?: number) => unwrap<{ saved: boolean }>(axiosClient().post(`/enrollments/notes/${nodeId}`, { body, timestamp_s })),
   },
@@ -780,6 +782,11 @@ export interface QuizAttempt {
   answers: { questionId: string; pickedIndex: number }[];
   attempted_at: string;
 }
+
+// Correct answers + explanations. Served by the quiz-attempt / attempts-history
+// endpoints (never the course content payload), so learners can't read answers
+// before submitting.
+export type QuizAnswerKey = { questionId: string; correctIndex: number; explanation?: string }[];
 
 export interface CertificateItem {
   id: string;

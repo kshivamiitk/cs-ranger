@@ -3,7 +3,7 @@ import http from "node:http";
 import cors from "cors";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import jwt from "jsonwebtoken";
-import { makeLogger, assertProductionEnv, requireJwtSecret } from "@cs-ranger/shared";
+import { makeLogger, assertProductionEnv, requireJwtSecret, requireInternalSecret } from "@cs-ranger/shared";
 
 // Fail fast on an unsafe production environment before binding the gateway.
 // (The other services validate via createService; the gateway builds its own app.)
@@ -33,6 +33,10 @@ const FRONTEND = process.env.FRONTEND_URL || "http://localhost:3000";
 // In production this throws if JWT_SECRET is missing/placeholder/short; in dev it
 // returns the shared dev fallback. Must match auth-service's signing secret.
 const JWT_SECRET = requireJwtSecret();
+// Shared secret stamped onto every proxied request so downstream services can
+// tell a gateway-routed request from a direct hit on their port. Required in
+// production (assertProductionEnv); a shared dev default in local.
+const INTERNAL_SECRET = requireInternalSecret();
 
 const SERVICES: Record<string, number> = {
   auth: 4001, users: 4002, courses: 4003, enrollments: 4004,
@@ -92,8 +96,23 @@ app.use((req, res, next) => {
   next();
 });
 
-// JWT decode → set x-user-* headers for downstream services
+// JWT decode → set x-user-* headers for downstream services.
+//
+// SECURITY: downstream services trust x-user-id/x-user-role/x-user-roles as the
+// authenticated identity (see shared/middleware/auth.ts attachUser). The gateway
+// is the ONLY place a real signed JWT is verified, so it must be the sole writer
+// of those headers. We unconditionally STRIP any client-supplied x-user-* first —
+// otherwise a caller could impersonate any user (or escalate to admin via
+// x-user-roles) just by sending the headers directly, with no token at all, or by
+// supplying x-user-roles alongside a token that carries no roles claim.
 app.use("/api", (req, _res, next) => {
+  delete req.headers["x-user-id"];
+  delete req.headers["x-user-role"];
+  delete req.headers["x-user-roles"];
+  // Stamp the internal trust token (and never let a client supply their own).
+  // Downstream services require this in production before honouring x-user-*.
+  delete req.headers["x-internal-key"];
+  req.headers["x-internal-key"] = INTERNAL_SECRET;
   const auth = req.header("authorization");
   if (!auth?.startsWith("Bearer ")) return next();
   const token = auth.slice(7);
@@ -103,7 +122,7 @@ app.use("/api", (req, _res, next) => {
     if (decoded.role) req.headers["x-user-role"] = decoded.role;
     if (Array.isArray(decoded.roles) && decoded.roles.length) req.headers["x-user-roles"] = decoded.roles.join(",");
   } catch {
-    // Invalid token — let downstream return 401 if needed
+    // Invalid token — leave the (now-stripped) headers unset so downstream 401s.
   }
   next();
 });

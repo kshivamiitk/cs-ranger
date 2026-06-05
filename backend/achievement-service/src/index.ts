@@ -58,7 +58,19 @@ consume<{ learnerId: string; courseId: string }>(Topics.ENROLLMENT_COMPLETED, as
 });
 
 // ─── Reads ────────────────────────────────────────────────────────
-app.get("/:userId/badges", async (req, res) => {
+// Per-user achievement data (badges, streak, activity heatmap) is private to the
+// user — only the user themself or an admin may read it. Without this gate these
+// were unauthenticated, so anyone could enumerate any user's activity by id.
+function ownUserOnly(req: import("express").Request, res: import("express").Response): boolean {
+  if (req.params.userId !== req.user!.id && req.user!.role !== "admin") {
+    fail(res, 403, "You can only view your own achievements", "FORBIDDEN");
+    return false;
+  }
+  return true;
+}
+
+app.get("/:userId/badges", requireAuth, async (req, res) => {
+  if (!ownUserOnly(req, res)) return;
   const data = await withDb(async (db) => {
     const { data: all } = await db.from("badges").select("*").order("position");
     const { data: earned } = await db.from("user_badges").select("badge_id, earned_at").eq("user_id", req.params.userId);
@@ -74,7 +86,8 @@ app.get("/:userId/badges", async (req, res) => {
   ok(res, data);
 });
 
-app.get("/:userId/streak", async (req, res) => {
+app.get("/:userId/streak", requireAuth, async (req, res) => {
+  if (!ownUserOnly(req, res)) return;
   const row = await withDb(async (db) => {
     const { data } = await db.from("user_streaks").select("*").eq("user_id", req.params.userId).maybeSingle();
     return data;
@@ -82,7 +95,8 @@ app.get("/:userId/streak", async (req, res) => {
   ok(res, row || { current_streak: 0, longest_streak: 0 });
 });
 
-app.get("/:userId/heatmap", async (req, res) => {
+app.get("/:userId/heatmap", requireAuth, async (req, res) => {
+  if (!ownUserOnly(req, res)) return;
   const data = await withDb(async (db) => {
     const start = new Date(); start.setDate(start.getDate() - 365);
     const { data } = await db.from("node_progress").select("completed_at").eq("learner_id", req.params.userId).gte("completed_at", start.toISOString()).eq("is_completed", true);
@@ -100,7 +114,8 @@ app.get("/:userId/heatmap", async (req, res) => {
 // ONE round trip. The home page previously fired three separate calls (streak,
 // badges, heatmap) to this service; this collapses them into a single request
 // with the queries fanned out via Promise.all.
-app.get("/:userId/summary", async (req, res) => {
+app.get("/:userId/summary", requireAuth, async (req, res) => {
+  if (!ownUserOnly(req, res)) return;
   const data = await withDb(async (db) => {
     const start = new Date(); start.setDate(start.getDate() - 365);
     const [streakRes, totalBadgesRes, earnedBadgesRes, progressRes] = await Promise.all([
@@ -255,8 +270,13 @@ app.get("/certificates/mine", requireAuth, async (req, res) => {
 });
 
 app.get("/certificates/verify/:token", async (req, res) => {
+  // Public, unauthenticated verification by random token. Return ONLY the fields
+  // the verify page renders — not select("*") — so this doesn't leak the
+  // internal learner_id/course_id or other certificate columns.
   const data = await withDb(async (db) => {
-    const { data: cert } = await db.from("certificates").select("*, courses(title, creator_id), profiles!certificates_learner_id_fkey(display_name, username)").eq("verification_token", req.params.token).maybeSingle();
+    const { data: cert } = await db.from("certificates")
+      .select("id, verification_token, issued_at, courses(title), profiles!certificates_learner_id_fkey(display_name, username)")
+      .eq("verification_token", req.params.token).maybeSingle();
     if (!cert) return null;
     return cert;
   }, null);

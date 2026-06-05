@@ -1714,6 +1714,14 @@ app.get("/:id", requireAuth, async (req, res) => {
             // Outline only — drop every content/answer-bearing field, keep metadata.
             delete n.video_url; delete n.pdf_url; delete n.markdown; delete n.static_website;
             delete n.quiz_payload; delete n.video_subtitles; delete n.video_chapters;
+          } else if (n.type === "quiz" && n.quiz_payload) {
+            // Quiz body IS shown (enrolled learner or free preview), but never the
+            // answer key — strip correctIndex + explanation from every question so
+            // a learner can't read the answers from the page source before
+            // attempting. The correct answers come back from the quiz-attempt
+            // response (enrollment-service) AFTER they submit, for review.
+            const qp = n.quiz_payload as { questions?: { correctIndex?: number; explanation?: string }[] };
+            for (const q of qp.questions || []) { delete q.correctIndex; delete q.explanation; }
           }
         }
       }

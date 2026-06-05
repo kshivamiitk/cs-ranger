@@ -437,6 +437,12 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
 // ─── Reads ────────────────────────────────────────────────────────
 app.get("/", requireAuth, async (req, res) => {
   const creatorId = (req.query.creatorId as string | undefined) || req.user!.id;
+  // Ownership: payout items carry amounts/gateway-ids/failure reasons — a creator
+  // may only read their own; an admin may read anyone's. Without this any
+  // authenticated user could pass ?creatorId=<someone else> and read their payouts.
+  if (creatorId !== req.user!.id && req.user!.role !== "admin") {
+    return fail(res, 403, "You can only view your own payouts", "FORBIDDEN");
+  }
   const list = await withDb(async (db) => {
     const { data } = await db.from("payout_items").select("*").eq("creator_id", creatorId).order("created_at", { ascending: false });
     return data || [];

@@ -8,6 +8,9 @@ const IS_PROD = process.env.NODE_ENV === "production";
 // reach a real deployment — assertProductionEnv()/requireJwtSecret() below
 // reject it (and anything else that looks like a placeholder) in production.
 const DEV_JWT_SECRET = "dev-secret-replace-me";
+// Same intent as DEV_JWT_SECRET, for the gateway↔service internal-key check.
+// Identical value across all services in dev so the check passes locally.
+const DEV_INTERNAL_SECRET = "dev-internal-secret-replace-me";
 
 // True for values that must never be accepted as a real secret in production:
 // too short, the known dev defaults, or obvious "replace me"/"your-…" stubs.
@@ -43,6 +46,28 @@ export function requireJwtSecret(): string {
 }
 
 /**
+ * Shared secret the api-gateway stamps onto every proxied request (header
+ * `x-internal-key`) and downstream services verify before trusting the
+ * `x-user-*` identity headers. This is the internal trust boundary: the gateway
+ * is the only component that verifies a real JWT, so a service must not honour
+ * identity headers on a request that didn't come through the gateway. Required
+ * in production (assertProductionEnv enforces it); a shared dev default is
+ * returned otherwise so local work needs no setup.
+ */
+export function requireInternalSecret(): string {
+  const secret = process.env.INTERNAL_API_SECRET;
+  if (!IS_PROD) return secret || DEV_INTERNAL_SECRET;
+  if (!secret || looksPlaceholder(secret)) {
+    throw new Error(
+      "FATAL: INTERNAL_API_SECRET is missing, a known placeholder, or shorter than 32 chars while " +
+        "NODE_ENV=production. Generate a strong secret (e.g. `openssl rand -hex 32`) and set " +
+        "INTERNAL_API_SECRET in the server environment before starting.",
+    );
+  }
+  return secret;
+}
+
+/**
  * Fail-fast environment validation, called once per service at startup
  * (via createService, and explicitly in api-gateway which builds its own app).
  *
@@ -67,6 +92,13 @@ export function assertProductionEnv(): void {
   const jwt = process.env.JWT_SECRET;
   if (!jwt || looksPlaceholder(jwt)) {
     fatal.push("JWT_SECRET is missing, a known placeholder, or < 32 chars (run `openssl rand -hex 32`).");
+  }
+  const internal = process.env.INTERNAL_API_SECRET;
+  if (!internal || looksPlaceholder(internal)) {
+    fatal.push(
+      "INTERNAL_API_SECRET is missing, a known placeholder, or < 32 chars — without it a caller who can " +
+        "reach a service port directly could forge x-user-* identity headers (run `openssl rand -hex 32`).",
+    );
   }
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
     fatal.push(

@@ -126,9 +126,14 @@ app.get("/creators", async (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 60, 1), 200);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
 
+  // Strip PostgREST filter metacharacters before interpolating into the .or()
+  // string. Commas/parentheses/dots structure a PostgREST logic-tree, so a raw
+  // query could otherwise inject extra conditions (filter injection). Mirrors the
+  // hygiene the /courses full-text path applies. Spaces are kept for ilike.
+  const safeQ = q.replace(/[^\w\s]/g, " ").trim();
   const list = await withDb(async (db) => {
     let query = db.from("creator_stats").select("*", { count: "exact" });
-    if (q) query = query.or(`display_name.ilike.%${q}%,username.ilike.%${q}%`);
+    if (safeQ) query = query.or(`display_name.ilike.%${safeQ}%,username.ilike.%${safeQ}%`);
     if (activeOnly) query = query.gt("course_count", 0);
     const ascending = sortKey === "name"; // names alphabetic; everything else desc.
     const { data, count } = await query

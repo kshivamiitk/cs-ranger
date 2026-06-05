@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, ChevronLeft, History, Loader2, XCircle } from "lucide-react";
-import { api, type CourseNode, type QuizAttempt } from "@/lib/api";
+import { api, type CourseNode, type QuizAttempt, type QuizAnswerKey } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/utils";
 import { SafeHtml } from "@/components/common/SafeHtml";
@@ -26,10 +26,11 @@ export function QuizPanel({
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [reviewAttempt, setReviewAttempt] = useState<QuizAttempt | null>(null);
 
-  const { data: attempts } = useQuery({
+  const { data: attemptsData } = useQuery({
     queryKey: ["quiz-attempts", nodeId],
     queryFn: () => api.enrollments.quizAttempts(nodeId),
   });
+  const attempts = attemptsData?.attempts;
 
   const submit = useMutation({
     mutationFn: () => api.enrollments.submitQuiz(nodeId, Object.entries(picked).map(([questionId, pickedIndex]) => ({ questionId, pickedIndex }))),
@@ -39,6 +40,17 @@ export function QuizPanel({
     },
   });
 
+  // Correct answers come from the server (after submitting, or the attempts
+  // history) — they are no longer embedded in the course payload. Fall back to
+  // any embedded value, which is only present when the creator/admin previews
+  // their own course.
+  const answerKey: QuizAnswerKey = submit.data?.answerKey ?? attemptsData?.answerKey ?? [];
+  const keyByQ = useMemo(() => {
+    const m = new Map<string, { correctIndex: number; explanation?: string }>();
+    for (const k of answerKey) m.set(k.questionId, { correctIndex: k.correctIndex, explanation: k.explanation });
+    return m;
+  }, [answerKey]);
+
   const passingPercent = quiz.passingPercent || 60;
 
   if (reviewAttempt) {
@@ -46,6 +58,7 @@ export function QuizPanel({
       <ReviewPanel
         quiz={quiz}
         attempt={reviewAttempt}
+        keyByQ={keyByQ}
         passingPercent={passingPercent}
         onBack={() => setReviewAttempt(null)}
       />
@@ -72,6 +85,10 @@ export function QuizPanel({
         {quiz.questions.map((q, qi) => {
           const submitted = !!submit.data;
           const isPicked = picked[q.id];
+          // Prefer the server-provided key; the embedded value only exists when an
+          // owner previews their own course.
+          const correctIndex = keyByQ.get(q.id)?.correctIndex ?? q.correctIndex;
+          const explanation = keyByQ.get(q.id)?.explanation ?? q.explanation;
           return (
             <div key={q.id}>
               <div className="flex gap-1.5 font-medium"><span>{qi + 1}.</span><SafeHtml html={q.prompt} className="flex-1" /></div>
@@ -83,7 +100,7 @@ export function QuizPanel({
                     className={cn(
                       "flex w-full items-start gap-2 rounded-xl border px-3 py-2 text-left text-sm transition",
                       submitted ? "cursor-default" : "cursor-pointer",
-                      submitted && i === q.correctIndex ? "border-success bg-success/10" :
+                      submitted && i === correctIndex ? "border-success bg-success/10" :
                       submitted && i === isPicked ? "border-danger bg-danger/10" :
                       isPicked === i ? "border-brand bg-surface-2" : "border-border bg-surface hover:bg-surface-2",
                     )}>
@@ -92,7 +109,7 @@ export function QuizPanel({
                   </div>
                 ))}
               </div>
-              {submitted && q.explanation && <div className="mt-2 text-xs text-fg-dim"><SafeHtml html={q.explanation} /></div>}
+              {submitted && explanation && <div className="mt-2 text-xs text-fg-dim"><SafeHtml html={explanation} /></div>}
             </div>
           );
         })}
@@ -139,7 +156,7 @@ export function QuizPanel({
   );
 }
 
-function ReviewPanel({ quiz, attempt, passingPercent, onBack }: { quiz: Quiz; attempt: QuizAttempt; passingPercent: number; onBack: () => void }) {
+function ReviewPanel({ quiz, attempt, keyByQ, passingPercent, onBack }: { quiz: Quiz; attempt: QuizAttempt; keyByQ: Map<string, { correctIndex: number; explanation?: string }>; passingPercent: number; onBack: () => void }) {
   const pickedByQuestion = new Map(attempt.answers.map((a) => [a.questionId, a.pickedIndex]));
   const pct = attempt.max_score > 0 ? Math.round((attempt.score / attempt.max_score) * 100) : 0;
   const passed = attempt.passed ?? pct >= passingPercent;
@@ -160,12 +177,14 @@ function ReviewPanel({ quiz, attempt, passingPercent, onBack }: { quiz: Quiz; at
       <div className="space-y-5">
         {quiz.questions.map((q, qi) => {
           const pickedIndex = pickedByQuestion.get(q.id);
+          const correctIndex = keyByQ.get(q.id)?.correctIndex ?? q.correctIndex;
+          const explanation = keyByQ.get(q.id)?.explanation ?? q.explanation;
           return (
             <div key={q.id}>
               <div className="flex gap-1.5 font-medium"><span>{qi + 1}.</span><SafeHtml html={q.prompt} className="flex-1" /></div>
               <div className="mt-2 space-y-1.5">
                 {q.options.map((opt, i) => {
-                  const isCorrect = i === q.correctIndex;
+                  const isCorrect = i === correctIndex;
                   const isPicked = i === pickedIndex;
                   return (
                     <div key={i}
@@ -182,7 +201,7 @@ function ReviewPanel({ quiz, attempt, passingPercent, onBack }: { quiz: Quiz; at
                   );
                 })}
               </div>
-              {q.explanation && <div className="mt-2 text-xs text-fg-dim"><SafeHtml html={q.explanation} /></div>}
+              {explanation && <div className="mt-2 text-xs text-fg-dim"><SafeHtml html={explanation} /></div>}
             </div>
           );
         })}

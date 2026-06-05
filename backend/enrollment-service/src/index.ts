@@ -189,13 +189,22 @@ app.post("/progress/:nodeId/complete", requireAuth, async (req, res) => {
 // Save watch position (video, every 10s)
 app.put("/progress/:nodeId/watch-position", requireAuth, async (req, res) => {
   const seconds = Math.max(0, Math.floor(Number(req.body.seconds || 0)));
-  await withDb(async (db) => {
+  // Same active-access gate as the progress/quiz paths: resolve the node to its
+  // course and require enrollment (or ownership/admin) before writing — a
+  // non-enrolled user shouldn't be able to seed node_progress rows for arbitrary
+  // lessons.
+  const result = await withDb<"ok" | "not_found" | "forbidden">(async (db) => {
+    const node = await getNodeCore(db, String(req.params.nodeId));
+    if (!node) return "not_found";
+    if (!(await canAccessCourse(db, req.user!.id, req.user!.role, node.course_id))) return "forbidden";
     await db.from("node_progress").upsert({
       learner_id: req.user!.id, node_id: req.params.nodeId,
       watch_position_s: seconds, last_accessed_at: new Date().toISOString(),
     }, { onConflict: "learner_id,node_id" });
-    return null;
-  }, null);
+    return "ok";
+  }, "ok");
+  if (result === "not_found") return fail(res, 404, "Lesson not found", "NOT_FOUND");
+  if (result === "forbidden") return fail(res, 403, "You need active access to this course", "NO_ACCESS");
   ok(res, { saved: true });
 });
 
@@ -223,8 +232,13 @@ app.get("/:courseId/progress", requireAuth, async (req, res) => {
 const QuizSubmit = z.object({
   answers: z.array(z.object({ questionId: z.string(), pickedIndex: z.number().int().min(0).max(3) })),
 });
+// The answer key is returned only to a learner who has just submitted an attempt
+// (or who has past attempts) — never embedded in the course content payload — so
+// answers can't be read ahead of time, but the post-submit/review UI can still
+// show which option was correct.
+type AnswerKeyEntry = { questionId: string; correctIndex: number; explanation?: string };
 type QuizAttemptResult = {
-  score: number; max: number; passed: boolean; attemptId?: string;
+  score: number; max: number; passed: boolean; attemptId?: string; answerKey?: AnswerKeyEntry[];
 } & Partial<CourseProgressResult>;
 app.post("/quiz/:nodeId/attempt", requireAuth, async (req, res) => {
   const parsed = QuizSubmit.safeParse(req.body);
@@ -236,7 +250,7 @@ app.post("/quiz/:nodeId/attempt", requireAuth, async (req, res) => {
     if (!(await canAccessCourse(db, req.user!.id, req.user!.role, core.course_id))) return { forbidden: true } as const;
     const { data: node } = await db.from("nodes").select("quiz_payload, module_id").eq("id", req.params.nodeId).maybeSingle();
     if (!node?.quiz_payload) return null;
-    type QP = { questions: { id: string; correctIndex: number }[]; passingPercent?: number };
+    type QP = { questions: { id: string; correctIndex: number; explanation?: string }[]; passingPercent?: number };
     const qp = node.quiz_payload as QP;
     let score = 0;
     for (const a of parsed.data.answers) {
@@ -246,6 +260,9 @@ app.post("/quiz/:nodeId/attempt", requireAuth, async (req, res) => {
     const max = qp.questions.length;
     const passing = qp.passingPercent || 60;
     const passed = max > 0 && (score / max) * 100 >= passing;
+    // The grader has the key in hand — return it so the player can show correct
+    // answers right after submitting (it's no longer in the course payload).
+    const answerKey: AnswerKeyEntry[] = qp.questions.map((q) => ({ questionId: q.id, correctIndex: q.correctIndex, explanation: q.explanation }));
 
     const { data: attempt } = await db.from("quiz_attempts").insert({
       learner_id: req.user!.id, node_id: req.params.nodeId,
@@ -263,7 +280,7 @@ app.post("/quiz/:nodeId/attempt", requireAuth, async (req, res) => {
         }
       }
     }
-    return { score, max, passed, attemptId: attempt?.id, ...(course || {}) };
+    return { score, max, passed, attemptId: attempt?.id, answerKey, ...(course || {}) };
   }, () => ({ score: 0, max: 0, passed: false }));
 
   if (result && "forbidden" in result) return fail(res, 403, "You need active access to this course to attempt its quiz", "NO_ACCESS");
@@ -272,17 +289,27 @@ app.post("/quiz/:nodeId/attempt", requireAuth, async (req, res) => {
   ok(res, result);
 });
 
-// Past attempts for review mode — read-only history, never editable.
+// Past attempts for review mode — read-only history, never editable. Returns the
+// answer key alongside the attempts ONLY when the learner already has at least
+// one attempt (so review can show correct answers), never to someone who hasn't
+// attempted — the course payload no longer carries the answers.
 app.get("/quiz/:nodeId/attempts", requireAuth, async (req, res) => {
-  const list = await withDb(async (db) => {
+  const result = await withDb(async (db) => {
     const { data } = await db.from("quiz_attempts")
       .select("id, score, max_score, passed, answers, attempted_at")
       .eq("learner_id", req.user!.id).eq("node_id", req.params.nodeId)
       .order("attempted_at", { ascending: false })
       .limit(20);
-    return data || [];
-  }, () => []);
-  ok(res, list);
+    const attempts = data || [];
+    let answerKey: { questionId: string; correctIndex: number; explanation?: string }[] = [];
+    if (attempts.length > 0) {
+      const { data: node } = await db.from("nodes").select("quiz_payload").eq("id", req.params.nodeId).maybeSingle();
+      const qp = node?.quiz_payload as { questions?: { id: string; correctIndex: number; explanation?: string }[] } | undefined;
+      answerKey = (qp?.questions || []).map((q) => ({ questionId: q.id, correctIndex: q.correctIndex, explanation: q.explanation }));
+    }
+    return { attempts, answerKey };
+  }, () => ({ attempts: [], answerKey: [] }));
+  ok(res, result);
 });
 
 // Learner notes (timestamped against video)
@@ -297,10 +324,16 @@ app.get("/notes/:nodeId", requireAuth, async (req, res) => {
 app.post("/notes/:nodeId", requireAuth, async (req, res) => {
   const body = String(req.body.body || ""); const timestamp = req.body.timestamp_s;
   if (!body) return fail(res, 400, "body required", "VALIDATION");
-  await withDb(async (db) => {
+  // Require active access to the node's course before creating a note against it.
+  const result = await withDb<"ok" | "not_found" | "forbidden">(async (db) => {
+    const node = await getNodeCore(db, String(req.params.nodeId));
+    if (!node) return "not_found";
+    if (!(await canAccessCourse(db, req.user!.id, req.user!.role, node.course_id))) return "forbidden";
     await db.from("learner_notes").insert({ learner_id: req.user!.id, node_id: req.params.nodeId, body, timestamp_s: timestamp });
-    return null;
-  }, null);
+    return "ok";
+  }, "ok");
+  if (result === "not_found") return fail(res, 404, "Lesson not found", "NOT_FOUND");
+  if (result === "forbidden") return fail(res, 403, "You need active access to this course", "NO_ACCESS");
   ok(res, { saved: true });
 });
 

@@ -1,4 +1,4 @@
-import { createService, ok, fail, paginate, mock, requireAuth, withDb, publish, Topics, getPlatformSetting } from "@cs-ranger/shared";
+import { createService, ok, fail, paginate, mock, requireAuth, requireRole, withDb, publish, Topics, getPlatformSetting } from "@cs-ranger/shared";
 import { z } from "zod";
 import { registerAdminRoutes } from "./admin.js";
 import { registerUploadRoutes } from "./uploads.js";
@@ -93,7 +93,16 @@ app.get("/by-username/:username", async (req, res) => {
 // Subscriptions (follow creators)
 app.post("/:creatorId/subscribe", requireAuth, async (req, res) => {
   if (req.user!.id === req.params.creatorId) return fail(res, 400, "Cannot subscribe to yourself", "VALIDATION");
-  await withDb(async (db) => { await db.from("subscriptions").insert({ learner_id: req.user!.id, creator_id: req.params.creatorId }); return null; }, null);
+  // Only allow subscribing to a real creator — otherwise a caller could insert
+  // subscription rows against arbitrary/non-existent ids.
+  const result = await withDb<"ok" | "not_creator">(async (db) => {
+    const { data: roleRow } = await db.from("user_roles")
+      .select("user_id").eq("user_id", req.params.creatorId).eq("role", "creator").maybeSingle();
+    if (!roleRow) return "not_creator";
+    await db.from("subscriptions").insert({ learner_id: req.user!.id, creator_id: req.params.creatorId });
+    return "ok";
+  }, "ok");
+  if (result === "not_creator") return fail(res, 404, "Creator not found", "NOT_FOUND");
   ok(res, { subscribed: true });
 });
 
@@ -225,7 +234,11 @@ app.post("/me/accept-creator-terms", requireAuth, async (req, res) => {
   ok(res, { accepted: true });
 });
 
-app.get("/", async (req, res) => {
+// Admin-only. This returns full profile rows (incl. the is_admin flag and
+// onboarding data) for every user, so it must not be public — it was previously
+// unauthenticated, letting anyone enumerate all users. The public, field-limited
+// reads are GET /by-username/:username and the search-service creator directory.
+app.get("/", requireRole("admin"), async (req, res) => {
   const page = Number(req.query.page || 1);
   const pageSize = Number(req.query.pageSize || 20);
   type ListResult = { items: unknown[]; total: number } | { items: unknown[]; meta: { page: number; pageSize: number; total: number } };

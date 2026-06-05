@@ -17,6 +17,18 @@ declare module "express-serve-static-core" {
  * their primary role is "learner".
  */
 export function attachUser(req: Request, _res: Response, next: NextFunction) {
+  // Internal trust boundary. In production, only honour the x-user-* identity
+  // headers when the request carries the gateway's shared secret (x-internal-key).
+  // The api-gateway is the sole component that verifies a real JWT, so a request
+  // without the matching secret never passed through it — we leave req.user unset
+  // (→ requireAuth returns 401) so a caller who reaches a service port directly
+  // can't forge an identity. In dev/test (NODE_ENV !== production) there's no
+  // enforcement, so the local x-user-* shim keeps working with no setup.
+  // INTERNAL_API_SECRET is mandatory in production (see assertProductionEnv).
+  if (process.env.NODE_ENV === "production") {
+    const expected = process.env.INTERNAL_API_SECRET;
+    if (!expected || req.header("x-internal-key") !== expected) return next();
+  }
   const id = req.header("x-user-id");
   const role = (req.header("x-user-role") as AppRole | undefined) || "learner";
   const rolesHeader = req.header("x-user-roles");

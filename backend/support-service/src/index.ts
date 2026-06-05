@@ -146,11 +146,20 @@ app.post("/:id/messages", requireAuth, async (req, res) => {
   const body = String(req.body.body || "");
   if (!body) return fail(res, 400, "body required", "VALIDATION");
   const isInternal = !!req.body.isInternalNote && req.user!.role === "admin";
-  await withDb(async (db) => {
+  // Ownership: a message may only be posted by the ticket's owner or an admin.
+  // Without this any authenticated user could inject messages into — and reopen
+  // (status→in_progress) — anyone's ticket by guessing its id. GET /:id already
+  // gates on the same rule; this write path must too.
+  const result = await withDb<"ok" | "not_found" | "forbidden">(async (db) => {
+    const { data: ticket } = await db.from("support_tickets").select("user_id").eq("id", req.params.id).maybeSingle();
+    if (!ticket) return "not_found";
+    if (ticket.user_id !== req.user!.id && req.user!.role !== "admin") return "forbidden";
     await db.from("ticket_messages").insert({ ticket_id: req.params.id, author_id: req.user!.id, body, is_internal_note: isInternal });
     await db.from("support_tickets").update({ status: "in_progress", updated_at: new Date().toISOString() }).eq("id", req.params.id);
-    return null;
-  }, null);
+    return "ok";
+  }, "ok");
+  if (result === "not_found") return fail(res, 404, "Ticket not found", "NOT_FOUND");
+  if (result === "forbidden") return fail(res, 403, "Forbidden", "FORBIDDEN");
   await publish(Topics.SUPPORT_TICKET_UPDATED, { ticketId: req.params.id, userId: req.user!.id });
   ok(res, { sent: true });
 });
