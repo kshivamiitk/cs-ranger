@@ -44,7 +44,11 @@ const DURATION = (SMOKE ? 5 : Number(process.env.DURATION || 30)) * 1000;
 const PUBLISH = SMOKE ? false : process.env.PUBLISH !== "0";
 const SEED_COURSES = SMOKE ? 1 : Math.min(40, Number(process.env.SEED_COURSES || CREATORS));
 const PASSWORD = "Loadtest123!"; // satisfies upper/lower/digit, >=8
-const REQ_TIMEOUT_MS = 15000;
+const REQ_TIMEOUT_MS = 30000;
+// Registration/login are bcrypt(cost 12) + several serial Supabase round-trips
+// (~1s each), and bcrypt is CPU-bound, so high concurrency just makes each one
+// slower and times them all out. Pace the setup phase deliberately low.
+const SETUP_CONCURRENCY = SMOKE ? 3 : Number(process.env.SETUP_CONCURRENCY || 8);
 
 const EMAIL = (n) => `lt_${RUN_ID}_${n}@loadtest.local`;
 const COURSE_TITLE = (n) => `LOADTEST-${RUN_ID} Course ${n}`;
@@ -114,24 +118,32 @@ async function pool(items, concurrency, fn) {
 // ---- setup: users -----------------------------------------------------------
 const users = []; // { email, token, userId, roles, isCreator }
 async function setupUsers() {
-  console.log(`\n[setup] registering ${USERS} users (${CREATORS} creators) @ ${BASE} …`);
+  console.log(`\n[setup] registering ${USERS} users (${CREATORS} creators) @ ${BASE}, concurrency=${SETUP_CONCURRENCY} …`);
+  console.log(`[setup] each register+login is ~1-2s (bcrypt + Supabase), so this paces low and may take a couple of minutes.`);
   const idxs = Array.from({ length: USERS }, (_, n) => n);
-  let ok = 0, fail = 0;
-  await pool(idxs, 40, async (n) => {
+  let ok = 0, fail = 0, sample = "";
+  await pool(idxs, SETUP_CONCURRENCY, async (n) => {
     const isCreator = n < CREATORS;
     const intent = isCreator ? rnd(["creator", "both"]) : "learner";
     const email = EMAIL(n);
     const reg = await req("auth/register", "POST", "/api/auth/register", {
       body: { email, password: PASSWORD, displayName: `LoadTest User ${n}`, intent },
     });
-    if (reg.status !== 201 && reg.status !== 200 && reg.status !== 409) { fail++; return; }
+    if (reg.status !== 201 && reg.status !== 200 && reg.status !== 409) {
+      fail++;
+      if (!sample) sample = `register http=${reg.status} ${reg.error || (reg.json && JSON.stringify(reg.json).slice(0, 140)) || ""}`;
+      if ((ok + fail) % 50 === 0) console.log(`[setup]  progress: ${ok} ok / ${fail} fail`);
+      return;
+    }
     const login = await req("auth/login", "POST", "/api/auth/login", { body: { email, password: PASSWORD } });
     const token = login.json?.data?.accessToken;
     const userId = login.json?.data?.user?.id;
     const roles = login.json?.data?.user?.roles || [intent];
-    if (token && userId) { users.push({ email, token, userId, roles, isCreator }); ok++; } else { fail++; }
+    if (token && userId) { users.push({ email, token, userId, roles, isCreator }); ok++; }
+    else { fail++; if (!sample) sample = `login http=${login.status} ${login.error || (login.json && JSON.stringify(login.json).slice(0, 140)) || ""}`; }
+    if ((ok + fail) % 50 === 0) console.log(`[setup]  progress: ${ok} ok / ${fail} fail`);
   });
-  console.log(`[setup] users ready: ${ok}  failed: ${fail}`);
+  console.log(`[setup] users ready: ${ok}  failed: ${fail}${sample ? `  (first failure: ${sample})` : ""}`);
 }
 
 // ---- setup: seed courses ----------------------------------------------------
@@ -141,7 +153,7 @@ async function seedCourses() {
   if (!creators.length) { console.log("[setup] no creators — skipping course seed"); return; }
   console.log(`[setup] seeding ${SEED_COURSES} tagged free courses (publish=${PUBLISH}) …`);
   const idxs = Array.from({ length: SEED_COURSES }, (_, n) => n);
-  await pool(idxs, 10, async (n) => {
+  await pool(idxs, SETUP_CONCURRENCY, async (n) => {
     const u = creators[n % creators.length];
     if (PUBLISH) await req("users/accept-terms", "POST", "/api/users/me/accept-creator-terms", { token: u.token, body: { termsVersion: "2026-05-01", commissionRate: 0.15 } });
     const c = await req("courses/create", "POST", "/api/courses", {
