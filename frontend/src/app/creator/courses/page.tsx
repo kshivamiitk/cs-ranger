@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { Plus, BarChart3, Pencil, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, BarChart3, Pencil, Loader2, Trash2, AlertCircle } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { api } from "@/lib/api";
@@ -11,12 +12,21 @@ import { formatCompact, formatINR } from "@/lib/utils";
 
 export default function CreatorCoursesPage() {
   const { user } = useApp();
+  const qc = useQueryClient();
   const creatorId = user?.user_id || user?.id;
+  const [err, setErr] = useState<string | null>(null);
   // Creator's own courses across ALL statuses (draft / under_review / published),
   // fetched server-side — the old api.courses.list() only returned published courses
   // and over-fetched the whole catalog before filtering on the client.
   const { data, isLoading } = useQuery({ queryKey: ["creator-courses", creatorId], queryFn: () => api.courses.mine(), enabled: !!creatorId });
   const own = data || [];
+
+  const del = useMutation({
+    mutationFn: (id: string) => api.courses.deleteCourse(id),
+    onSuccess: () => { setErr(null); qc.invalidateQueries({ queryKey: ["creator-courses", creatorId] }); },
+    // Surfaces the server's reason — e.g. "this course has N purchases — unpublish instead".
+    onError: (e) => setErr(e instanceof Error ? e.message : "Could not delete the course"),
+  });
 
   return (
     <>
@@ -29,6 +39,12 @@ export default function CreatorCoursesPage() {
           </div>
           <Link href="/creator/courses/new" data-tour="new-course" className="btn-primary"><Plus className="h-4 w-4" /> Create new</Link>
         </div>
+
+        {err && (
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{err}</span>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="mt-6 flex justify-center text-fg-dim"><Loader2 className="h-6 w-6 animate-spin" /></div>
@@ -59,6 +75,13 @@ export default function CreatorCoursesPage() {
                     <td className="p-3 text-right">
                       <Link href={`/creator/courses/${c.id}/analytics`} className="inline-flex items-center gap-1 text-xs text-brand mr-3"><BarChart3 className="h-3 w-3" /> Analytics</Link>
                       <Link href={`/creator/courses/${c.id}/edit`} className="inline-flex items-center gap-1 text-xs text-fg-dim hover:text-fg"><Pencil className="h-3 w-3" /> Edit</Link>
+                      <button
+                        onClick={() => { if (confirm(`Delete "${c.title}"? This can't be undone. (Blocked if anyone has purchased it.)`)) del.mutate(c.id); }}
+                        disabled={del.isPending}
+                        className="ml-3 inline-flex items-center gap-1 text-xs text-fg-dim hover:text-danger disabled:opacity-50"
+                      >
+                        {del.isPending && del.variables === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />} Delete
+                      </button>
                     </td>
                   </tr>
                 ))}

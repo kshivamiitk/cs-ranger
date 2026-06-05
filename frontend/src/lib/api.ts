@@ -279,6 +279,8 @@ export const api = {
     addNode: (b: NodeCreate) => unwrap<CourseNode>(axiosClient().post("/courses/nodes", b)),
     updateNode: (nodeId: string, b: Partial<CourseNode>) => unwrap<CourseNode>(axiosClient().patch(`/courses/nodes/${nodeId}`, b)),
     deleteNode: (nodeId: string) => unwrap<{ deleted: boolean }>(axiosClient().delete(`/courses/nodes/${nodeId}`)),
+    // Owner/admin only; the server refuses (409) if the course has any purchases.
+    deleteCourse: (courseId: string) => unwrap<{ deleted: boolean }>(axiosClient().delete(`/courses/${courseId}`)),
     reviews: (courseId: string, page = 1) => unwrap<Review[]>(axiosClient().get(`/courses/${courseId}/reviews`, { params: { page } })),
     addReview: (courseId: string, rating: number, body?: string) => unwrap<Review>(axiosClient().post(`/courses/${courseId}/reviews`, { rating, body })),
     myReview: (courseId: string) => unwrap<Review | null>(axiosClient().get(`/courses/${courseId}/reviews/mine`)),

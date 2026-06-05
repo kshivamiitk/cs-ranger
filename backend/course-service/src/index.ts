@@ -379,6 +379,44 @@ app.post("/", requireRole("creator", "admin"), async (req, res) => {
   ok(res, result);
 });
 
+// Delete a course — OWNER (or admin) only, and ONLY if nobody has purchased it.
+// A successful, non-refunded payment = a paying learner; deleting would strip
+// their access, so we block it (unpublish instead). Modules/lessons/enrollments/
+// reviews/bookmarks cascade; payments + razorpay_orders are ON DELETE RESTRICT,
+// so any lingering checkout record surfaces as a FK error we translate to a
+// clear message rather than a 500.
+app.delete("/:id", requireRole("creator", "admin"), async (req, res) => {
+  const courseId = req.params.id;
+  const result = await withDb<{ ok: true } | { error: { status: number; message: string; code: string } }>(async (db) => {
+    const role = await courseEditorRole(db, courseId, req.user!.id, req.user!.role === "admin");
+    if (!role) return { error: { status: 404, message: "Course not found", code: "NOT_FOUND" } };
+    if (role !== "owner" && req.user!.role !== "admin") {
+      return { error: { status: 403, message: "Only the course owner can delete it", code: "FORBIDDEN" } };
+    }
+    // The rule: block if anyone has purchased it.
+    const { count } = await db.from("payments")
+      .select("id", { count: "exact", head: true })
+      .eq("course_id", courseId).eq("status", "success");
+    if ((count || 0) > 0) {
+      return { error: { status: 409, code: "HAS_PURCHASERS",
+        message: `This course has ${count} purchase${count === 1 ? "" : "s"} — it can't be deleted (that would revoke paid learners' access). Unpublish it instead so no new learners can buy it.` } };
+    }
+    const { error } = await db.from("courses").delete().eq("id", courseId);
+    if (error) {
+      // 23503 = FK violation: a payment/order row (e.g. an abandoned or in-flight
+      // checkout) still references the course. Don't 500 — explain it.
+      if ((error as { code?: string }).code === "23503") {
+        return { error: { status: 409, code: "HAS_PAYMENT_RECORDS",
+          message: "This course has payment records (e.g. abandoned or in-flight checkouts) on file and can't be deleted yet. Unpublish it, or contact support to clear those records." } };
+      }
+      throw error;
+    }
+    return { ok: true };
+  }, () => ({ error: { status: 503, message: "Delete needs a configured database", code: "DB_REQUIRED" } }));
+  if ("error" in result) return fail(res, result.error.status, result.error.message, result.error.code);
+  ok(res, { deleted: true });
+});
+
 const CourseUpdate = CourseCreate.partial();
 app.patch("/:id", requireRole("creator", "admin"), async (req, res) => {
   const parsed = CourseUpdate.safeParse(req.body);
