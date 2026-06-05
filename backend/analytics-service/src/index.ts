@@ -19,6 +19,8 @@ function canViewCreator(req: { user?: { id: string; role: string } }, creatorId:
 }
 
 app.get("/learner/:userId/report-card", requireAuth, async (req, res) => {
+  // Ownership: a learner may only read their OWN report card; admins read anyone's.
+  if (!canViewCreator(req, String(req.params.userId))) return fail(res, 403, "You can only view your own report card", "FORBIDDEN");
   const data = await cached(`learner-${req.params.userId}`, 5 * 60 * 1000, async () =>
     withDb(async (db) => {
       const [{ data: enrollments }, { data: attempts }] = await Promise.all([

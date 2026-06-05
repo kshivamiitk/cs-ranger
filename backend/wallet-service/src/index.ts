@@ -1,4 +1,4 @@
-import { createService, ok, paginate, mock, requireAuth, requireRole, withDb, getPlatformSetting } from "@cs-ranger/shared";
+import { createService, ok, fail, paginate, mock, requireAuth, requireRole, withDb, getPlatformSetting } from "@cs-ranger/shared";
 
 const { app, listen, log } = createService("wallet-service");
 const PORT = Number(process.env.PORT_WALLET || 4007);
@@ -16,6 +16,7 @@ const PORT = Number(process.env.PORT_WALLET || 4007);
 void log;
 
 app.get("/:creatorId/balance", requireAuth, async (req, res) => {
+  if (req.user!.id !== req.params.creatorId && req.user!.role !== "admin") return fail(res, 403, "Forbidden", "FORBIDDEN");
   const row = await withDb(async (db) => {
     const { data } = await db.from("creator_balances").select("*").eq("creator_id", req.params.creatorId).maybeSingle();
     return data;
@@ -24,6 +25,7 @@ app.get("/:creatorId/balance", requireAuth, async (req, res) => {
 });
 
 app.get("/:creatorId/ledger", requireAuth, async (req, res) => {
+  if (req.user!.id !== req.params.creatorId && req.user!.role !== "admin") return fail(res, 403, "Forbidden", "FORBIDDEN");
   const page = Number(req.query.page || 1);
   const pageSize = Number(req.query.pageSize || 20);
   type ListResult = { items: unknown[]; total: number } | { items: unknown[]; meta: { page: number; pageSize: number; total: number } };

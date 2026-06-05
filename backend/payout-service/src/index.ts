@@ -106,6 +106,9 @@ app.post("/kyc/:creatorId", requireAuth, async (req, res) => {
 });
 
 app.get("/kyc/:creatorId", requireAuth, async (req, res) => {
+  // Ownership: KYC holds bank/UPI/contact details — only the creator themself or
+  // an admin may read it. (The POST already checks this; the GET did not.)
+  if (req.user!.id !== req.params.creatorId && req.user!.role !== "admin") return fail(res, 403, "Forbidden", "FORBIDDEN");
   const row = await withDb(async (db) => {
     const { data } = await db.from("kyc_details").select("*").eq("creator_id", req.params.creatorId).maybeSingle();
     return data;
