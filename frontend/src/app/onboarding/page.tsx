@@ -94,10 +94,23 @@ export default function OnboardingPage() {
     },
     onSuccess: async () => {
       qc.invalidateQueries({ queryKey: ["onboarding"] });
-      qc.invalidateQueries({ queryKey: meQueryOptions.queryKey });
       qc.invalidateQueries({ queryKey: ["creator-terms-status"] });
-      if (user) setUser({ ...user, has_completed_onboarding: true });
-      if (roleIntent !== "learner") setRoleView("creator");
+      // Re-fetch the authoritative profile so a creator/both role CHOSEN DURING
+      // onboarding is reflected immediately. Previously we spread the stale
+      // `user` (still holding the signup-time roles), so the Learner/Creator role
+      // switcher and the creator nav didn't appear until a full page reload
+      // re-fetched /me. Fetching here updates both the app user and the ["me"]
+      // query cache in one shot.
+      qc.invalidateQueries({ queryKey: meQueryOptions.queryKey });
+      try {
+        const me = await qc.fetchQuery(meQueryOptions);
+        setUser(me);
+        if (me.roles?.includes("creator")) setRoleView("creator");
+      } catch {
+        // Network hiccup — fall back to the optimistic update; a reload will reconcile.
+        if (user) setUser({ ...user, has_completed_onboarding: true });
+        if (roleIntent !== "learner") setRoleView("creator");
+      }
       router.replace(roleIntent === "learner" ? "/home" : "/creator/overview");
     },
     onError: (e) => setError(e instanceof Error ? e.message : "Could not finish onboarding"),

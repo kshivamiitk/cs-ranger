@@ -25,10 +25,15 @@ export default function LoginPage() {
       const { user, accessToken, refreshToken } = await api.auth.login(form);
       localStorage.setItem("access_token", accessToken);
       localStorage.setItem("refresh_token", refreshToken);
+      // Set roles immediately so the navbar role switcher renders without a
+      // flicker, then navigate.
       setUser({ id: user.id, displayName: user.displayName, username: "", roles: user.roles });
       const role = user.roles.includes("admin") ? "admin" : user.roles.includes("creator") ? "creator" : "learner";
       setRoleView(role);
       router.push(role === "admin" ? "/admin/overview" : role === "creator" ? "/creator/overview" : "/home");
+      // Reconcile to the authoritative profile in the background (full roles,
+      // onboarding state, username, avatar) without delaying the redirect.
+      api.users.me().then((me) => setUser(me)).catch(() => { /* keep the login snapshot */ });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Login failed";
       setError(msg);
