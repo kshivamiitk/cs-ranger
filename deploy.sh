@@ -126,8 +126,8 @@ pm2 startOrReload ecosystem.config.cjs --update-env
 
 log "wait for frontend"
 FRONTEND_OK=0
-# Next.js can take 90-120s to start on the 2 GB VM after a fresh production
-# build. Give it enough time before declaring the deploy failed.
+# Next.js can take 90-120s to become ready after a fresh production build on a
+# cold/small VM. Give it enough time before declaring the deploy failed.
 for _ in $(seq 1 90); do
   if curl -fsS -o /dev/null http://127.0.0.1:3000; then
     FRONTEND_OK=1

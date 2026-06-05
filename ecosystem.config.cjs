@@ -41,7 +41,8 @@ module.exports = {
         NODE_ENV: "production",
       },
       // Headroom for Next.js so a busy (not leaking) process isn't
-      // killed-and-restarted mid-request. Tune down on a small (2 GB) VM.
+      // killed-and-restarted mid-request. The prod VM has ~16 GB RAM so this is
+      // comfortable; tune down only on a genuinely small (<=2 GB) box.
       max_memory_restart: "1536M",
       time: true,
       ...restartPolicy,

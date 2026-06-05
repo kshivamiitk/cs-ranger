@@ -9,6 +9,10 @@ This project deploys to one Google Compute Engine VM with:
 - PM2 as the process manager.
 - GitHub Actions as CI/CD.
 
+The current production VM (`learnrift-prod-1`) has ~16 GB RAM and ample disk, so
+memory is not a constraint for the 14 Node processes (~1 GB total in practice).
+The "small VM" notes below apply only to a fresh, under-provisioned instance.
+
 ## One-Time VM Setup
 
 Run these on the VM once:
@@ -22,8 +26,10 @@ sudo apt install -y nodejs
 sudo npm install -g pm2
 ```
 
-On a 2 GB VM, add swap before the first build. This avoids short memory spikes
-during `npm ci` and `next build` taking the site down:
+On a small VM (<=2 GB), add swap before the first build. This avoids short memory
+spikes during `npm ci` and `next build` taking the site down. (The current prod
+box has plenty of RAM and already has swap configured; this matters mainly for a
+fresh small instance.)
 
 ```bash
 if ! swapon --show | grep -q /swapfile; then
@@ -140,9 +146,9 @@ The app is intentionally stopped before install/build because this is a cheap
 single-VM deployment. That short downtime is safer than building Next.js while
 all backend services are already using RAM.
 
-On the 2 GB VM, `next start` can take around 90-120 seconds to become ready
-after a fresh build. `deploy.sh` waits up to 180 seconds before failing the
-frontend health check.
+On a small or cold VM, `next start` can take around 90-120 seconds to become
+ready after a fresh build. `deploy.sh` waits up to 180 seconds before failing
+the frontend health check.
 
 ## Manual Recovery
 
@@ -162,7 +168,7 @@ pm2 resurrect
 pm2 status
 ```
 
-If memory pressure appears on a 2 GB VM, add swap:
+If memory pressure appears on a small VM, add swap:
 
 ```bash
 sudo fallocate -l 2G /swapfile
@@ -177,8 +183,17 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 Do this order:
 
 1. Keep one VM, add PM2 startup, add swap, and make deploys clean.
-2. If memory still stays high or Node processes restart often, resize from
-   `e2-small` to `e2-medium`.
+2. If memory genuinely stays high (check `free -h`), resize from `e2-small` to
+   `e2-medium`. **But frequent PM2 restarts are usually NOT memory.** On this box
+   they have been startup crash-loops: every backend service runs
+   `assertProductionEnv()` via `createService`, so one missing/invalid required
+   env var (e.g. `INTERNAL_API_SECRET`, `JWT_SECRET`, `SUPABASE_*`) makes them all
+   throw on boot and restart endlessly — the api-gateway flaps and the GCP uptime
+   check pages. Diagnose with `pm2 logs <service> --err --lines 40 --nostream`
+   and `free -h` BEFORE blaming RAM; resizing never fixes a crash-on-boot.
+   (Mitigations already in place: exponential-backoff restarts in
+   `ecosystem.config.cjs`, and a secret preflight in `deploy.sh` that aborts a
+   deploy rather than swapping in crash-looping processes.)
 3. Only add a load balancer, managed instance group, and autoscaling after the
    app is stable on one VM and traffic justifies the extra cost.
 
