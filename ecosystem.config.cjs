@@ -14,6 +14,22 @@ const backendServices = [
   ["cs-analytics-service", "analytics-service"],
 ];
 
+// Crash-loop hardening shared by every app. When a process exits unexpectedly
+// (a missing env var, a transient Supabase/Redis blip, an unhandled rejection)
+// PM2 used to restart it INSTANTLY, hundreds of times a minute — that's the
+// huge ↺ restart counts on the backend services, and every loop made the
+// gateway flap and tripped the uptime alert. With exponential backoff each
+// successive restart waits longer (200ms → … capped ~15s) so a crash becomes a
+// quiet, self-healing retry instead of a storm. `min_uptime` means a process
+// has to stay up 20s to count as a clean start, so a fast boot-crash is treated
+// as unstable and backed off rather than hammered.
+const restartPolicy = {
+  autorestart: true,
+  min_uptime: "20s",
+  exp_backoff_restart_delay: 200,
+  kill_timeout: 5000,
+};
+
 module.exports = {
   apps: [
     {
@@ -24,10 +40,11 @@ module.exports = {
       env: {
         NODE_ENV: "production",
       },
-      // 16 GB VM — give Next.js real headroom so a busy (not leaking) process
-      // isn't killed-and-restarted mid-request (which looked like a "crash").
+      // Headroom for Next.js so a busy (not leaking) process isn't
+      // killed-and-restarted mid-request. Tune down on a small (2 GB) VM.
       max_memory_restart: "1536M",
       time: true,
+      ...restartPolicy,
     },
     ...backendServices.map(([name, workspace]) => ({
       name,
@@ -39,6 +56,7 @@ module.exports = {
       },
       max_memory_restart: "512M",
       time: true,
+      ...restartPolicy,
     })),
   ],
 };

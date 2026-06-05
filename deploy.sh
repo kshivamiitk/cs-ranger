@@ -100,6 +100,20 @@ if [[ "${NEXT_PUBLIC_API_URL:-}" =~ localhost|127\.0\.0\.1|0\.0\.0\.0 ]]; then
   exit 1
 fi
 
+# Preflight the secrets every backend service requires at startup. createService
+# calls assertProductionEnv(), which THROWS when any of these is missing — so
+# without this guard `pm2 startOrReload` below would swap in processes that
+# instantly crash-loop and take the whole API down (a 502 for everyone) while
+# the deploy "succeeds" up to the health gate. Failing here instead aborts the
+# deploy with the CURRENT, working processes left untouched.
+for var in JWT_SECRET INTERNAL_API_SECRET SUPABASE_URL SUPABASE_SERVICE_KEY; do
+  if [[ -z "${!var:-}" ]]; then
+    echo "Refusing to deploy: $var is not set in $APP_DIR/.env." >&2
+    echo "All backend services would crash-loop on boot. Set it (e.g. \`openssl rand -hex 32\` for secrets) and re-run." >&2
+    exit 1
+  fi
+done
+
 log "build frontend"
 # Keep the previous .next in place during the build so the still-running
 # `next start` isn't disrupted; next build overwrites it. (No rm -rf.)
