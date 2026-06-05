@@ -1,6 +1,22 @@
 import { createService, ok, fail, requireAuth, withDb, supabaseAdmin, isSupabaseConfigured, consume, Topics, publish } from "@cs-ranger/shared";
 import { z } from "zod";
 import { applyProgress, getNodeCore, onCourseCompleted, recomputeCourseProgress, type CourseProgressResult } from "./completion.js";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+// Active access = an unexpired enrollment (NULL expiry = permanent), the course
+// owner, or an admin. Gates the progress/quiz endpoints so a non-enrolled (or
+// expired) user can't fake progress, pass quizzes, or trigger a certificate by
+// hitting the API directly with a guessed nodeId.
+async function canAccessCourse(db: SupabaseClient, userId: string, role: string | undefined, courseId: string): Promise<boolean> {
+  const { data: enr } = await db.from("enrollments").select("access_expires_at").eq("learner_id", userId).eq("course_id", courseId).maybeSingle();
+  if (enr) {
+    const exp = (enr as { access_expires_at?: string | null }).access_expires_at ?? null;
+    if (exp === null || new Date(exp).getTime() > Date.now()) return true;
+  }
+  if (role === "admin") return true;
+  const { data: course } = await db.from("courses").select("creator_id").eq("id", courseId).maybeSingle();
+  return (course as { creator_id?: string } | null)?.creator_id === userId;
+}
 
 const { app, listen, log } = createService("enrollment-service");
 const PORT = Number(process.env.PORT_ENROLLMENT || 4004);
@@ -124,10 +140,13 @@ type ProgressResponse = {
   scrollPercent: number; watchSeconds: number;
 } & Partial<CourseProgressResult> & { quizRequired?: boolean };
 
-async function handleProgressUpdate(learnerId: string, nodeId: string, signal: z.infer<typeof ProgressUpdate>): Promise<ProgressResponse | { error: { status: number; message: string; code: string } }> {
+async function handleProgressUpdate(learnerId: string, role: string | undefined, nodeId: string, signal: z.infer<typeof ProgressUpdate>): Promise<ProgressResponse | { error: { status: number; message: string; code: string } }> {
   return withDb<ProgressResponse | { error: { status: number; message: string; code: string } }>(async (db) => {
     const node = await getNodeCore(db, nodeId);
     if (!node) return { error: { status: 404, message: "Lesson not found", code: "NOT_FOUND" } };
+    if (!(await canAccessCourse(db, learnerId, role, node.course_id))) {
+      return { error: { status: 403, message: "You need active access to this course to track progress", code: "NO_ACCESS" } };
+    }
     if (node.type === "quiz" && signal.markDone) {
       return { error: { status: 400, message: "Quizzes are completed by reaching the passing score, not by marking done", code: "QUIZ_PASS_REQUIRED" } };
     }
@@ -153,7 +172,7 @@ async function handleProgressUpdate(learnerId: string, nodeId: string, signal: z
 app.post("/progress/:nodeId", requireAuth, async (req, res) => {
   const parsed = ProgressUpdate.safeParse(req.body);
   if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message, "VALIDATION");
-  const result = await handleProgressUpdate(req.user!.id, String(req.params.nodeId), parsed.data);
+  const result = await handleProgressUpdate(req.user!.id, req.user!.role, String(req.params.nodeId), parsed.data);
   if ("error" in result) return fail(res, result.error.status, result.error.message, result.error.code);
   if (result.newlyCompleted) await publish(Topics.NODE_COMPLETED, { learnerId: req.user!.id, nodeId: req.params.nodeId });
   ok(res, result);
@@ -161,7 +180,7 @@ app.post("/progress/:nodeId", requireAuth, async (req, res) => {
 
 // Mark a node complete (legacy explicit Mark-as-Done — same policy path; quizzes are rejected).
 app.post("/progress/:nodeId/complete", requireAuth, async (req, res) => {
-  const result = await handleProgressUpdate(req.user!.id, String(req.params.nodeId), { markDone: true });
+  const result = await handleProgressUpdate(req.user!.id, req.user!.role, String(req.params.nodeId), { markDone: true });
   if ("error" in result) return fail(res, result.error.status, result.error.message, result.error.code);
   if (result.newlyCompleted) await publish(Topics.NODE_COMPLETED, { learnerId: req.user!.id, nodeId: req.params.nodeId });
   ok(res, result);
@@ -211,7 +230,10 @@ app.post("/quiz/:nodeId/attempt", requireAuth, async (req, res) => {
   const parsed = QuizSubmit.safeParse(req.body);
   if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message, "VALIDATION");
 
-  const result = await withDb<QuizAttemptResult | null>(async (db) => {
+  const result = await withDb<QuizAttemptResult | { forbidden: true } | null>(async (db) => {
+    const core = await getNodeCore(db, String(req.params.nodeId));
+    if (!core) return null;
+    if (!(await canAccessCourse(db, req.user!.id, req.user!.role, core.course_id))) return { forbidden: true } as const;
     const { data: node } = await db.from("nodes").select("quiz_payload, module_id").eq("id", req.params.nodeId).maybeSingle();
     if (!node?.quiz_payload) return null;
     type QP = { questions: { id: string; correctIndex: number }[]; passingPercent?: number };
@@ -244,6 +266,7 @@ app.post("/quiz/:nodeId/attempt", requireAuth, async (req, res) => {
     return { score, max, passed, attemptId: attempt?.id, ...(course || {}) };
   }, () => ({ score: 0, max: 0, passed: false }));
 
+  if (result && "forbidden" in result) return fail(res, 403, "You need active access to this course to attempt its quiz", "NO_ACCESS");
   if (!result) return fail(res, 404, "Quiz node not found", "NOT_FOUND");
   if (result.passed) await publish(Topics.NODE_COMPLETED, { learnerId: req.user!.id, nodeId: req.params.nodeId });
   ok(res, result);

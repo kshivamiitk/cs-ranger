@@ -1683,12 +1683,41 @@ app.post("/storage/verify", requireRole("creator", "admin"), async (req, res) =>
 
 // Catch-all course fetch — MUST be last. Express matches in registration
 // order, so any literal one-segment GET path declared above wins over this.
-app.get("/:id", async (req, res) => {
+// Full course CONTENT (used by the player + the creator's builder — never the
+// public marketing page, which uses /:id/detail). Gated: a node's body
+// (video_url, pdf_url, markdown, static_website, quiz answers) is returned ONLY
+// to the owner/admin, an enrolled learner with ACTIVE access, or for nodes
+// marked is_free_preview. Everyone else gets the outline (titles/types/order)
+// with bodies + quiz answers stripped — closes the "anyone reads paid content
+// and quiz answers without enrolling / after expiry" hole.
+app.get("/:id", requireAuth, async (req, res) => {
   const c = await withDb(async (db) => {
     const { data } = await db.from("courses").select("*, modules(*, nodes(*))").eq("id", req.params.id).maybeSingle();
-    // PostgREST returns embedded modules/nodes unordered — sort by position so
-    // the editor (and player) always see the curriculum in the saved order.
-    if (data) (data as { modules?: unknown }).modules = sortCourseTree((data as { modules?: (WithPosition & { nodes?: WithPosition[] | null })[] }).modules);
+    if (!data) return null;
+    (data as { modules?: unknown }).modules = sortCourseTree((data as { modules?: (WithPosition & { nodes?: WithPosition[] | null })[] }).modules);
+
+    const isOwner = (data as { creator_id?: string }).creator_id === req.user!.id || req.user!.role === "admin";
+    let entitled = isOwner;
+    if (!entitled) {
+      const { data: enr } = await db.from("enrollments").select("access_expires_at")
+        .eq("learner_id", req.user!.id).eq("course_id", req.params.id).maybeSingle();
+      const exp = (enr as { access_expires_at?: string | null } | null)?.access_expires_at ?? null;
+      entitled = !!enr && (exp === null || new Date(exp).getTime() > Date.now());
+    }
+
+    if (!isOwner) {
+      const mods = (data as { modules?: { nodes?: Record<string, unknown>[] | null }[] }).modules || [];
+      for (const m of mods) {
+        for (const n of (m.nodes || [])) {
+          const showBody = entitled || n.is_free_preview === true;
+          if (!showBody) {
+            // Outline only — drop every content/answer-bearing field, keep metadata.
+            delete n.video_url; delete n.pdf_url; delete n.markdown; delete n.static_website;
+            delete n.quiz_payload; delete n.video_subtitles; delete n.video_chapters;
+          }
+        }
+      }
+    }
     return data;
   }, () => mock.courses.find((x) => x.id === req.params.id));
   if (!c) return fail(res, 404, "Course not found", "NOT_FOUND");
