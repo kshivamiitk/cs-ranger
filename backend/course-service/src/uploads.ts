@@ -105,6 +105,12 @@ export function registerCourseUploadRoutes(app: Express, helpers: UploadHelpers)
 
       const storagePath = normalizeStoragePath(`attachments/${nodeId}`, file.originalname);
       await storeFile({ bucket: "node-attachments", path: storagePath, buffer: file.buffer, mimeType: file.mimetype });
+      // Count the bytes toward the creator's storage. The storage.objects trigger
+      // is a no-op (migration 0035), so accounting is app-side via commit_storage
+      // — same as PDFs and rich-text images. Without this, attachments grew the
+      // bucket but never moved the usage counter the UI/quota reads.
+      const { error: commitErr } = await db.rpc("commit_storage", { p_creator_id: req.user!.id, p_bytes: file.size });
+      if (commitErr) throw commitErr;
       const { data, error } = await db.from("uploaded_assets").insert({
         owner_id: req.user!.id, bucket: "node-attachments", path: storagePath,
         original_filename: file.originalname, mime_type: file.mimetype, size_bytes: file.size,
@@ -209,6 +215,12 @@ export function registerCourseUploadRoutes(app: Express, helpers: UploadHelpers)
       }
       if (!allowed) return { error: { status: 403, message: "You can't delete this file", code: "FORBIDDEN" } };
       await db.from("uploaded_assets").delete().eq("id", assetId);
+      // Give the bytes back to the creator's quota for counted asset types
+      // (attachments + rich-text images are committed on upload; thumbnails are
+      // not counted, so skip them) — otherwise deleting never frees space.
+      if (a.entity_type === "node_attachment" || a.entity_type === "rich_image") {
+        await db.rpc("release_storage", { p_creator_id: a.owner_id, p_bytes: a.size_bytes });
+      }
       return { asset: a };
     }, () => ({ error: { status: 503, message: "Asset deletion needs a configured database", code: "DB_REQUIRED" } }));
 
