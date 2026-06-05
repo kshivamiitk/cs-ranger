@@ -140,20 +140,34 @@ type WriteCheck =
 async function assertCanWriteCourse(
   db: SupabaseClient, courseId: string | string[], userId: string, isAdmin: boolean,
 ): Promise<WriteCheck> {
-  const role = await courseEditorRole(db, courseId, userId, isAdmin);
+  // Admin bypasses editor + lock checks — keep the zero-query fast path.
+  if (isAdmin) return { ok: true, role: "admin" };
+  // Single round-trip: editor role + edit-lock state in one read, replacing the
+  // previous 2-3 sequential selects (courses → maybe collaborators → lock). That
+  // authz was the dominant latency on the write path; course_write_check
+  // (migration 0036) returns the same role values courseEditorRole produced.
+  const { data } = await db.rpc("course_write_check", { p_course_id: String(courseId), p_user_id: userId });
+  const row = (Array.isArray(data) ? data[0] : data) as {
+    role: "owner" | "collaborator" | null;
+    lock_held_by: string | null;
+    lock_expires_at: string | null;
+    lock_holder_name: string | null;
+    lock_expired: boolean | null;
+  } | null;
+  const role = row?.role ?? null;
   if (!role) return { ok: false, status: 403, code: "NOT_EDITOR", message: "Not an editor of this course" };
-  if (role === "admin") return { ok: true, role };
-  const lock = await getCourseLock(db, courseId);
-  if (!lock || lock.expired) {
+  const heldBy = row!.lock_held_by;
+  if (!heldBy || (row!.lock_expired ?? true)) {
     return { ok: false, status: 423, code: "LOCK_REQUIRED", message: "Acquire the edit lock before saving" };
   }
-  if (lock.heldBy !== userId) {
+  if (heldBy !== userId) {
+    const holderName = row!.lock_holder_name || "Someone";
     return {
       ok: false, status: 423, code: "LOCK_HELD_BY_OTHER",
-      message: `Locked by ${lock.holderName}`,
+      message: `Locked by ${holderName}`,
       // holderId duplicates heldBy so clients can rely on the documented
       // LOCKED-error shape (holderId / holderName / expiresAt).
-      meta: { heldBy: lock.heldBy, holderId: lock.heldBy, holderName: lock.holderName, expiresAt: lock.expiresAt },
+      meta: { heldBy, holderId: heldBy, holderName, expiresAt: row!.lock_expires_at },
     };
   }
   return { ok: true, role };
