@@ -473,11 +473,28 @@ app.post("/:id/refund", requireRole("admin"), async (req, res) => {
   // Refund window is enforced inside refund_payment() RPC — single source of
   // truth so the two layers never drift. (Was previously checked here too.)
 
-  if (isRazorpayConfigured() && payment.razorpay_payment_id) {
+  if (isRazorpayConfigured()) {
+    // Make sure we have the gateway payment id to refund against. Reconciled or
+    // older rows can lack razorpay_payment_id; fetch the captured payment from
+    // the order (same source the reconcile path uses) so an APPROVED refund
+    // always moves real money — never "marked refunded" with nothing returned.
+    let rzpPaymentId = payment.razorpay_payment_id as string | null;
+    if (!rzpPaymentId && payment.razorpay_order_id) {
+      try {
+        const resp = await razorpay().orders.fetchPayments(payment.razorpay_order_id) as { items?: { id: string; status: string }[] };
+        rzpPaymentId = pickCapturablePayment(resp?.items)?.id ?? null;
+      } catch (e) {
+        log.error("refund: fetchPayments failed", { paymentId, err: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (!rzpPaymentId) {
+      // Don't strip access without returning money — bail loudly instead.
+      return fail(res, 502, "Cannot auto-refund: no captured gateway payment was found for this order. Check it in the Razorpay dashboard before retrying.", "NO_GATEWAY_PAYMENT");
+    }
     try {
-      await razorpay().payments.refund(payment.razorpay_payment_id, { amount: payment.amount, speed: "normal" });
+      await razorpay().payments.refund(rzpPaymentId, { amount: payment.amount, speed: "normal" });
     } catch (e) {
-      log.error("razorpay refund failed", { err: e instanceof Error ? e.message : String(e) });
+      log.error("razorpay refund failed", { paymentId, err: e instanceof Error ? e.message : String(e) });
       return fail(res, 502, "Refund failed at gateway", "GATEWAY_ERROR");
     }
   }
