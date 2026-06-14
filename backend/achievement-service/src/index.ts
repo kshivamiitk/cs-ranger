@@ -59,6 +59,15 @@ async function evaluateCertificateEligibility(db: SupabaseClient, learnerId: str
         .eq("passed", true)
         .in("node_id", quizIds);
       const passedIds = new Set((passed || []).map((p) => p.node_id));
+      const { data: completedQuizProgress } = await db.from("node_progress")
+        .select("node_id")
+        .eq("learner_id", learnerId)
+        .eq("is_completed", true)
+        .in("node_id", quizIds);
+      // Quiz nodes can only be marked complete by the quiz path. Treat completed
+      // progress as pass evidence so older/migrated progress is not blocked by a
+      // missing quiz_attempts row.
+      for (const row of completedQuizProgress || []) passedIds.add(row.node_id);
       if (quizIds.some((id) => !passedIds.has(id))) {
         return { ok: false, status: 400, message: "Pass every quiz lesson before claiming a certificate", code: "QUIZ_PASS_REQUIRED" };
       }

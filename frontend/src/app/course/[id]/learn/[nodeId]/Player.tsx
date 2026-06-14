@@ -81,8 +81,20 @@ export function Player({ course, initialNodeId }: { course: Course; initialNodeI
 
   const handleProgressResult = useCallback((result: NodeProgressResult, sourceNodeId: string, opts?: { autoAdvance?: boolean }) => {
     if (result.newlyCompleted) {
-      qc.invalidateQueries({ queryKey: ["course-progress", course.id] });
-      qc.invalidateQueries({ queryKey: ["enrollments"] });
+      qc.setQueryData<{ enrollment: unknown | null; completedNodeIds: string[] }>(["course-progress", course.id], (old) => {
+        const completedNodeIds = new Set(old?.completedNodeIds || []);
+        completedNodeIds.add(sourceNodeId);
+        const enrollmentPatch: Record<string, unknown> = {};
+        if (result.courseProgressPercent != null) enrollmentPatch.progress_percent = result.courseProgressPercent;
+        if (result.courseCompleted) enrollmentPatch.completed_at = new Date().toISOString();
+        return {
+          enrollment: old?.enrollment
+            ? { ...(old.enrollment as Record<string, unknown>), ...enrollmentPatch }
+            : old?.enrollment ?? null,
+          completedNodeIds: Array.from(completedNodeIds),
+        };
+      });
+      if (result.courseJustCompleted) qc.invalidateQueries({ queryKey: ["enrollments"] });
       if (opts?.autoAdvance !== false && sourceNodeId === activeIdRef.current && nextIdRef.current) {
         setAutoAdvanceUntil(Date.now() + 5000);
       }

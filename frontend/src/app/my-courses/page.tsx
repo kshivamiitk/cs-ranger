@@ -2,26 +2,57 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Award, Download, Loader2 } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { Progress } from "@/components/common/Progress";
-import { api } from "@/lib/api";
+import { api, type CertificateItem, type Course } from "@/lib/api";
 import { useApp } from "@/app/providers";
-import { durationFromSeconds, relativeTime } from "@/lib/utils";
+import { durationFromSeconds, relativeTime, saveBlob } from "@/lib/utils";
 
 export default function MyCoursesPage() {
   const { user } = useApp();
   const userId = user?.user_id || user?.id;
+  const qc = useQueryClient();
   const [tab, setTab] = useState<"progress" | "completed">("progress");
+  const [certificateErrors, setCertificateErrors] = useState<Record<string, string>>({});
   // Same cache key as the home dashboard's "Continue learning" — one fetch shared across both.
   const { data: enrollments, isLoading } = useQuery({ queryKey: ["my-enrollments", userId], queryFn: () => api.enrollments.list(), enabled: !!user });
+  const { data: certificates } = useQuery({
+    queryKey: ["my-certificates", userId],
+    queryFn: () => api.achievements.myCertificates(),
+    enabled: !!userId && tab === "completed",
+  });
+  const claimCertificate = useMutation({
+    mutationFn: (courseId: string) => api.achievements.claimCertificate(courseId),
+    onSuccess: (_data, courseId) => {
+      setCertificateErrors((prev) => {
+        const next = { ...prev };
+        delete next[courseId];
+        return next;
+      });
+      qc.invalidateQueries({ queryKey: ["my-certificates", userId] });
+    },
+    onError: (e, courseId) => {
+      setCertificateErrors((prev) => ({ ...prev, [courseId]: e instanceof Error ? e.message : "Could not claim certificate" }));
+    },
+  });
+  const downloadCertificate = useMutation({
+    mutationFn: async (cert: CertificateItem) => {
+      const blob = await api.achievements.downloadCertificate(cert.id);
+      saveBlob(blob, `learnrift-certificate-${cert.id}.pdf`);
+    },
+    onError: (e, cert) => {
+      setCertificateErrors((prev) => ({ ...prev, [cert.course_id]: e instanceof Error ? e.message : "Could not download certificate" }));
+    },
+  });
   if (!user) return null;
 
   const inProgress = (enrollments || []).filter((e) => !e.completed_at);
   const completed = (enrollments || []).filter((e) => e.completed_at);
   const list = tab === "progress" ? inProgress : completed;
+  const certificateByCourse = new Map((certificates || []).map((cert) => [cert.course_id, cert]));
 
   return (
     <>
@@ -69,7 +100,7 @@ export default function MyCoursesPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2 md:justify-end">
                       {/* Without last_node_id we don't know a valid nodeId here (the
                           list endpoint doesn't fetch modules to stay fast). Route to
                           the course page, which resolves the first lesson and routes
@@ -80,6 +111,17 @@ export default function MyCoursesPage() {
                       >
                         {tab === "progress" ? "Continue" : "Review"}
                       </Link>
+                      {tab === "completed" && c.certificate_enabled !== false ? (
+                        <CertificateAction
+                          course={c}
+                          certificate={certificateByCourse.get(c.id)}
+                          error={certificateErrors[c.id]}
+                          claimPending={claimCertificate.isPending && claimCertificate.variables === c.id}
+                          downloadPending={downloadCertificate.isPending && downloadCertificate.variables?.id === certificateByCourse.get(c.id)?.id}
+                          onClaim={() => claimCertificate.mutate(c.id)}
+                          onDownload={(cert) => downloadCertificate.mutate(cert)}
+                        />
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -90,5 +132,38 @@ export default function MyCoursesPage() {
       </main>
       <Footer />
     </>
+  );
+}
+
+function CertificateAction({
+  course,
+  certificate,
+  error,
+  claimPending,
+  downloadPending,
+  onClaim,
+  onDownload,
+}: {
+  course: Course;
+  certificate?: CertificateItem;
+  error?: string;
+  claimPending: boolean;
+  downloadPending: boolean;
+  onClaim: () => void;
+  onDownload: (cert: CertificateItem) => void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-1 md:items-end">
+      {certificate ? (
+        <button onClick={() => onDownload(certificate)} disabled={downloadPending} className="btn-primary text-sm disabled:opacity-50" aria-label={`Download certificate for ${course.title}`}>
+          {downloadPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Certificate
+        </button>
+      ) : (
+        <button onClick={onClaim} disabled={claimPending} className="btn-primary text-sm disabled:opacity-50" aria-label={`Claim certificate for ${course.title}`}>
+          {claimPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Award className="h-4 w-4" />} Claim certificate
+        </button>
+      )}
+      {error ? <p className="max-w-64 text-xs text-danger md:text-right">{error}</p> : null}
+    </div>
   );
 }

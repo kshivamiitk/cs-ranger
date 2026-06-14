@@ -46,16 +46,38 @@ const SERVICES: Record<string, number> = {
 
 app.use(cors({ origin: FRONTEND, credentials: true, exposedHeaders: ["x-request-id"] }));
 
-// Per-IP rate limit (300 req/min/IP for general, 5/15min for login)
+// Rate limit:
+// - login remains strict per IP
+// - anonymous traffic is per IP
+// - authenticated traffic is per user id, with a larger interactive budget
+// The learner player can legitimately generate many small progress requests
+// while a user moves through short lessons; keying all of that only by NAT/proxy
+// IP caused false 429s for normal course navigation.
 const buckets = new Map<string, { count: number; resetAt: number }>();
 const loginBuckets = new Map<string, { count: number; resetAt: number }>();
+function rateLimitIdentity(req: express.Request): { key: string; authenticated: boolean } {
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  const auth = req.header("authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+  if (!token) return { key: `ip:${ip}`, authenticated: false };
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as { sub?: string; id?: string };
+    const userId = decoded.sub || decoded.id;
+    if (userId) return { key: `user:${userId}`, authenticated: true };
+  } catch {
+    // Invalid/expired tokens fall back to the anonymous IP bucket. The auth
+    // middleware below still decides whether the request is allowed.
+  }
+  return { key: `ip:${ip}`, authenticated: false };
+}
 app.use((req, res, next) => {
   if (req.method === "OPTIONS") return next();
-  const key = req.ip || req.socket.remoteAddress || "unknown";
   const now = Date.now();
   const isLogin = req.path.startsWith("/api/auth/login");
+  const ident = rateLimitIdentity(req);
+  const key = isLogin ? `login:${req.ip || req.socket.remoteAddress || "unknown"}` : ident.key;
   const bucket = isLogin ? loginBuckets : buckets;
-  const limit = isLogin ? 5 : 300;
+  const limit = isLogin ? 5 : ident.authenticated ? Number(process.env.AUTH_RATE_LIMIT_PER_MIN || 1200) : 300;
   const window = isLogin ? 15 * 60_000 : 60_000;
   const b = bucket.get(key);
   if (!b || b.resetAt < now) { bucket.set(key, { count: 1, resetAt: now + window }); return next(); }

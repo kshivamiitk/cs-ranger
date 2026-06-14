@@ -87,7 +87,7 @@ app.get("/", requireAuth, async (req, res) => {
   // Uses idx_enrollments_learner_last (learner_id, last_accessed_at desc).
   const list = await withDb(async (db) => {
     const { data } = await db.from("enrollments")
-      .select("id, course_id, progress_percent, last_node_id, last_accessed_at, completed_at, enrolled_at, access_expires_at, courses(id, title, thumbnail_url, duration_seconds)")
+      .select("id, course_id, progress_percent, last_node_id, last_accessed_at, completed_at, enrolled_at, access_expires_at, courses(id, title, thumbnail_url, duration_seconds, certificate_enabled)")
       .eq("learner_id", req.user!.id)
       .order("last_accessed_at", { ascending: false });
     return data || [];
