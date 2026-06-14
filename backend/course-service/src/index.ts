@@ -47,6 +47,35 @@ async function getCreatorStorage(db: SupabaseClient, creatorId: string): Promise
   };
 }
 
+function publishStorageQuotaError(state: StorageState) {
+  if (state.bytes_used <= state.quota_bytes) return null;
+  return {
+    quotaExceeded: true,
+    used: state.bytes_used,
+    quota: state.quota_bytes,
+    needed: state.bytes_used - state.quota_bytes,
+    priceInrPerMb: STORAGE_PRICE_PER_MB_INR,
+  } as const;
+}
+
+function staticWebsitePayloadBytes(payload: unknown): number {
+  if (!payload) return 0;
+  return Buffer.byteLength(JSON.stringify(payload), "utf8");
+}
+
+function storageQuotaDeltaError(state: StorageState, deltaBytes: number) {
+  if (deltaBytes <= 0) return null;
+  const projected = state.bytes_used + deltaBytes;
+  if (projected <= state.quota_bytes) return null;
+  return {
+    overQuota: true,
+    used: state.bytes_used,
+    quota: state.quota_bytes,
+    needed: projected - state.quota_bytes,
+    priceInrPerMb: STORAGE_PRICE_PER_MB_INR,
+  } as const;
+}
+
 /**
  * Refresh the catalog snapshot when a course's published-or-not state
  * changes. Two things happen:
@@ -597,6 +626,8 @@ app.post("/:id/publish", requireRole("creator"), async (req, res) => {
     if (!lessonCount || lessonCount < 1) {
       return { invalid: "Add at least one lesson before publishing" } as const;
     }
+    const storageError = publishStorageQuotaError(await getCreatorStorage(db, course.creator_id));
+    if (storageError) return storageError;
     const { data, error } = await db.from("courses").update({ status: "published" }).eq("id", req.params.id).select("id, status, published_at").maybeSingle();
     if (error) throw error;
     if (data) await refreshCatalogSnapshot(db);
@@ -606,6 +637,15 @@ app.post("/:id/publish", requireRole("creator"), async (req, res) => {
   if ("ok" in result && result.ok === false) return fail(res, result.status, result.message, result.code, result.meta);
   if ("notFound" in result) return fail(res, 404, "Course not found", "NOT_FOUND");
   if ("invalid" in result) return fail(res, 400, result.invalid ?? "Invalid request", "VALIDATION");
+  if ("quotaExceeded" in result) {
+    return fail(
+      res,
+      402,
+      `You're over your storage quota. Buy more storage before publishing this course.`,
+      "QUOTA_EXCEEDED",
+      { used: result.used, quota: result.quota, needed: result.needed, priceInrPerMb: result.priceInrPerMb },
+    );
+  }
   await publish(Topics.COURSE_PUBLISHED, { courseId: (result as { id: string }).id, creatorId: req.user!.id });
   await notifyOnPublish((result as { id: string }).id, req.user!.id, wasPublishedBefore);
   ok(res, result);
@@ -732,6 +772,14 @@ app.post("/nodes", requireRole("creator", "admin"), async (req, res) => {
     if (!courseId) return { notFound: true } as const;
     const check = await assertCanWriteCourse(db, courseId, req.user!.id, req.user!.role === "admin");
     if (!check.ok) return check;
+    if (d.type === "static_website") {
+      const { data: course } = await db.from("courses").select("creator_id").eq("id", courseId).maybeSingle();
+      if (course?.creator_id) {
+        const state = await getCreatorStorage(db, course.creator_id);
+        const quotaError = storageQuotaDeltaError(state, staticWebsitePayloadBytes(d.static_website));
+        if (quotaError) return quotaError;
+      }
+    }
     const { count } = await db.from("nodes").select("id", { count: "exact", head: true }).eq("module_id", d.moduleId);
     const { data, error } = await db.from("nodes").insert({
       module_id: d.moduleId, type: d.type, title: d.title, position: count || 0,
@@ -746,6 +794,9 @@ app.post("/nodes", requireRole("creator", "admin"), async (req, res) => {
   }, () => ({ id: `n-${Date.now()}`, ...d }));
   if (result && "ok" in result && result.ok === false) return fail(res, result.status, result.message, result.code, result.meta);
   if (result && "notFound" in result) return fail(res, 404, "Module not found", "NOT_FOUND");
+  if (result && "overQuota" in result) {
+    return fail(res, 402, "You're over your storage quota. Buy more storage before saving or publishing this course.", "QUOTA_EXCEEDED", result);
+  }
   await publish(Topics.COURSE_NODE_ADDED, { nodeId: (result as { id: string }).id, moduleId: d.moduleId });
   ok(res, result);
 });
@@ -765,11 +816,27 @@ app.patch("/nodes/:id", requireRole("creator", "admin"), async (req, res) => {
     if (!courseId) return { notFound: true } as const;
     const check = await assertCanWriteCourse(db, courseId, req.user!.id, req.user!.role === "admin");
     if (!check.ok) return check;
+    if (Object.prototype.hasOwnProperty.call(patch, "static_website")) {
+      const [{ data: course }, { data: existing }] = await Promise.all([
+        db.from("courses").select("creator_id").eq("id", courseId).maybeSingle(),
+        db.from("nodes").select("type, static_website").eq("id", req.params.id).maybeSingle(),
+      ]);
+      if (course?.creator_id && existing?.type === "static_website") {
+        const oldBytes = staticWebsitePayloadBytes(existing.static_website);
+        const newBytes = staticWebsitePayloadBytes(patch.static_website);
+        const state = await getCreatorStorage(db, course.creator_id);
+        const quotaError = storageQuotaDeltaError(state, newBytes - oldBytes);
+        if (quotaError) return quotaError;
+      }
+    }
     const { data } = await db.from("nodes").update(patch).eq("id", req.params.id).select("*").maybeSingle();
     return data;
   }, null);
   if (result && "ok" in result && result.ok === false) return fail(res, result.status, result.message, result.code, result.meta);
   if (result && "notFound" in result) return fail(res, 404, "Lesson not found", "NOT_FOUND");
+  if (result && "overQuota" in result) {
+    return fail(res, 402, "You're over your storage quota. Buy more storage before saving or publishing this course.", "QUOTA_EXCEEDED", result);
+  }
   ok(res, result);
 });
 

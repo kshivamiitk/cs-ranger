@@ -27,6 +27,7 @@ const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 const RICH_IMG_MAX_BYTES = 5 * 1024 * 1024;
 const RICH_IMG_MIME = ["image/jpeg", "image/png", "image/webp"]; // match the course-assets bucket allow-list
 const STORAGE_FREE_MB = Number(process.env.CREATOR_STORAGE_FREE_MB || 2);
+const STORAGE_PRICE_PER_MB_INR = Number(process.env.CREATOR_STORAGE_PRICE_PER_MB_INR || 5);
 const BYTES_PER_MB = 1024 * 1024;
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api").replace(/\/$/, "");
 
@@ -54,6 +55,24 @@ interface AssetRow {
 async function assetDownloadUrl(asset: Pick<AssetRow, "bucket" | "path">): Promise<string> {
   const signed = await createStorageSignedUrl(asset.bucket, asset.path, 3600);
   return signed || `${API_BASE}/courses/uploads/local-file?bucket=${encodeURIComponent(asset.bucket)}&path=${encodeURIComponent(asset.path)}`;
+}
+
+async function storageQuotaError(db: SupabaseClient, creatorId: string, bytesToAdd: number) {
+  const { data: row } = await db.from("creator_storage")
+    .select("bytes_used, extra_bytes, extra_until").eq("creator_id", creatorId).maybeSingle();
+  const used = Number((row as { bytes_used?: number } | null)?.bytes_used ?? 0);
+  const extraBytes = Number((row as { extra_bytes?: number } | null)?.extra_bytes ?? 0);
+  const extraUntil = (row as { extra_until?: string | null } | null)?.extra_until ?? null;
+  const extraValid = !!extraUntil && new Date(extraUntil).getTime() > Date.now();
+  const quota = STORAGE_FREE_MB * BYTES_PER_MB + (extraValid ? extraBytes : 0);
+  const projected = used + bytesToAdd;
+  if (projected <= quota) return null;
+  return {
+    status: 402,
+    message: "You're over your storage quota. Buy more storage before saving or publishing this course.",
+    code: "QUOTA_EXCEEDED",
+    meta: { used, quota, needed: projected - quota, priceInrPerMb: STORAGE_PRICE_PER_MB_INR },
+  };
 }
 
 export function registerCourseUploadRoutes(app: Express, helpers: UploadHelpers) {
@@ -97,11 +116,13 @@ export function registerCourseUploadRoutes(app: Express, helpers: UploadHelpers)
     const check = validateUpload({ mimeType: file.mimetype, sizeBytes: file.size, maxBytes: ATTACHMENT_MAX_BYTES });
     if (!check.ok) return fail(res, 400, check.message, "VALIDATION");
 
-    const result = await withDb<{ asset: AssetRow } | { error: { status: number; message: string; code: string } }>(async (db) => {
+    const result = await withDb<{ asset: AssetRow } | { error: { status: number; message: string; code: string; meta?: Record<string, unknown> } }>(async (db) => {
       const courseId = await nodeCourseId(db, nodeId);
       if (!courseId) return { error: { status: 404, message: "Lesson not found", code: "NOT_FOUND" } };
       const role = await courseEditorRole(db, courseId, req.user!.id, req.user!.role === "admin");
       if (!role) return { error: { status: 403, message: "Not an editor of this course", code: "NOT_EDITOR" } };
+      const quotaError = await storageQuotaError(db, req.user!.id, file.size);
+      if (quotaError) return { error: quotaError };
 
       const storagePath = normalizeStoragePath(`attachments/${nodeId}`, file.originalname);
       await storeFile({ bucket: "node-attachments", path: storagePath, buffer: file.buffer, mimeType: file.mimetype });
@@ -120,7 +141,7 @@ export function registerCourseUploadRoutes(app: Express, helpers: UploadHelpers)
       return { asset: data as AssetRow };
     }, () => ({ error: { status: 503, message: "Attachments need a configured database", code: "DB_REQUIRED" } }));
 
-    if ("error" in result) return fail(res, result.error.status, result.error.message, result.error.code);
+    if ("error" in result) return fail(res, result.error.status, result.error.message, result.error.code, result.error.meta);
     ok(res, { ...result.asset, url: await assetDownloadUrl(result.asset) });
   });
 
@@ -139,16 +160,8 @@ export function registerCourseUploadRoutes(app: Express, helpers: UploadHelpers)
     type RichErr = { error: { status: number; message: string; code: string; meta?: Record<string, unknown> } };
     const result = await withDb<RichOk | RichErr>(async (db) => {
       // Quota pre-check (bill the uploader, same as PDF lessons).
-      const { data: row } = await db.from("creator_storage")
-        .select("bytes_used, extra_bytes, extra_until").eq("creator_id", creatorId).maybeSingle();
-      const used = Number((row as { bytes_used?: number } | null)?.bytes_used ?? 0);
-      const extraBytes = Number((row as { extra_bytes?: number } | null)?.extra_bytes ?? 0);
-      const extraUntil = (row as { extra_until?: string | null } | null)?.extra_until ?? null;
-      const extraValid = !!extraUntil && new Date(extraUntil).getTime() > Date.now();
-      const quota = STORAGE_FREE_MB * BYTES_PER_MB + (extraValid ? extraBytes : 0);
-      if (used + file.size > quota) {
-        return { error: { status: 402, message: "You're over your storage quota. Free up space or buy more storage.", code: "QUOTA_EXCEEDED", meta: { used, quota, needed: file.size } } };
-      }
+      const quotaError = await storageQuotaError(db, creatorId, file.size);
+      if (quotaError) return { error: quotaError };
 
       const storagePath = normalizeStoragePath(`rich/${creatorId}`, file.originalname);
       const stored = await storeFile({ bucket: "course-assets", path: storagePath, buffer: file.buffer, mimeType: file.mimetype, publicBucket: true });

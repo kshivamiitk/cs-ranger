@@ -57,7 +57,7 @@ const STEPS: TourStep[] = [
     element: "[data-tour='nav-storage']",
     title: "Step 4 — Storage quota",
     description:
-      "PDFs and lesson attachments use your storage (1 MB free to start; buy more anytime). Video lessons live on our CDN separately, so they don't count.",
+      "PDFs, static sites, rich images, and lesson attachments use your storage (1 MB free to start; buy more anytime). Video lessons live on our CDN separately, so they don't count.",
   },
   {
     route: "/creator/overview",

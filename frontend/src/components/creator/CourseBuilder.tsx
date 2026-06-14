@@ -98,6 +98,7 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
   const [adderOpenFor, setAdderOpenFor] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
+  const [storageBlocked, setStorageBlocked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
@@ -435,6 +436,7 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
   }
 
   async function onSave() {
+    setStorageBlocked(false);
     if (course.title.trim().length < 3) {
       setError("Course title needs at least 3 characters before saving.");
       setSelected({ kind: "course" });
@@ -449,11 +451,14 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
       // First save of a new course: switch URL to /edit/<id> so refresh keeps the work.
       if (wasNew && id && !editing) router.replace(`/creator/courses/${id}/edit`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      const message = e instanceof Error ? e.message : "Save failed";
+      if (message.toLowerCase().includes("storage quota")) setStorageBlocked(true);
+      setError(message);
     } finally { setBusy(false); }
   }
 
   async function onPublish(skipTermsCheck = false) {
+    setStorageBlocked(false);
     if (course.title.trim().length < 3) {
       setError("Course title needs at least 3 characters before publishing.");
       setSelected({ kind: "course" });
@@ -481,6 +486,7 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
       const message = e instanceof Error ? e.message : "Publish failed";
       // Server-side gate fallback (e.g. terms version bumped mid-session).
       if (message.toLowerCase().includes("creator terms")) setShowTerms(true);
+      if (message.toLowerCase().includes("storage quota")) setStorageBlocked(true);
       setError(message);
     } finally { setPublishing(false); }
   }
@@ -547,8 +553,16 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
         )}
 
         {error && (
-          <div className="mb-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span>
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+            <div className="flex min-w-0 items-start gap-2">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+            {storageBlocked && (
+              <a href="/creator/storage" className="shrink-0 rounded-md border border-danger/30 px-2 py-1 text-xs font-medium hover:bg-danger/10">
+                Buy storage
+              </a>
+            )}
           </div>
         )}
 
@@ -1190,4 +1204,3 @@ function StatusChip({ status }: { status: Collaborator["status"] }) {
   const m = map[status];
   return <span className={cn("chip", m.cls)}>{m.label}</span>;
 }
-

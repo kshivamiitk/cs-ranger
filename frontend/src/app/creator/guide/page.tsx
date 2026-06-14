@@ -28,6 +28,7 @@ const STEPS = [
 const CHECKLIST = [
   "Title is at least 3 characters and clearly describes the outcome",
   "At least one module and one lesson exist (required to publish)",
+  "Storage usage is within your quota, or you have purchased enough extra storage",
   "A thumbnail and subtitle are set so the catalog listing looks complete",
   "Price (and any discounted price) is correct — a discounted price must be lower than the full price",
   "Lessons are in a sensible order and each one plays/loads",
