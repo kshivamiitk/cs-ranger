@@ -56,7 +56,7 @@ function readCachedRoleView(): RoleView | null {
 
 // Routes a logged-in-but-not-onboarded user can still visit without being
 // bounced into the wizard.
-const ONBOARDING_EXEMPT = ["/onboarding", "/login", "/signup", "/verify", "/forgot-password", "/reset-password"];
+const ONBOARDING_EXEMPT = ["/onboarding", "/login", "/signup", "/verify", "/forgot-password", "/reset-password", "/cli-auth"];
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

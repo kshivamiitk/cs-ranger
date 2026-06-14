@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Eye, EyeOff, ArrowRight, Mail, Lock, AlertCircle } from "lucide-react";
 import { api } from "@/lib/api";
+import { consumePostAuthRedirect } from "@/lib/authRedirect";
 import { useApp } from "@/app/providers";
 import { Field } from "@/components/auth/AuthFields";
 import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
@@ -30,7 +31,7 @@ export default function LoginPage() {
       setUser({ id: user.id, displayName: user.displayName, username: "", roles: user.roles });
       const role = user.roles.includes("admin") ? "admin" : user.roles.includes("creator") ? "creator" : "learner";
       setRoleView(role);
-      router.push(role === "admin" ? "/admin/overview" : role === "creator" ? "/creator/overview" : "/home");
+      router.push(consumePostAuthRedirect("/cli-auth") ?? (role === "admin" ? "/admin/overview" : role === "creator" ? "/creator/overview" : "/home"));
       // Reconcile to the authoritative profile in the background (full roles,
       // onboarding state, username, avatar) without delaying the redirect.
       api.users.me().then((me) => setUser(me)).catch(() => { /* keep the login snapshot */ });

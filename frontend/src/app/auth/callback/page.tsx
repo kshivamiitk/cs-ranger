@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, Loader2 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { api } from "@/lib/api";
+import { consumePostAuthRedirect } from "@/lib/authRedirect";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/app/providers";
 
@@ -42,6 +43,11 @@ export default function OAuthCallbackPage() {
         else setUser({ id: user.id, displayName: user.displayName, username: user.username, roles: user.roles, avatar_url: user.avatarUrl || undefined });
         const role = user.roles.includes("admin") ? "admin" : user.roles.includes("creator") ? "creator" : "learner";
         setRoleView(role);
+        const postAuthRedirect = consumePostAuthRedirect("/cli-auth");
+        if (postAuthRedirect) {
+          router.replace(postAuthRedirect);
+          return;
+        }
         router.replace(role === "admin" ? "/admin/overview" : role === "creator" ? "/creator/overview" : "/home");
       } catch (e) {
         handledRef.current = false;

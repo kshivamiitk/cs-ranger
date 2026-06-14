@@ -10,6 +10,7 @@
     "build": "npm --prefix frontend run build",
     "start": "concurrently -k -n backend,frontend -c cyan,magenta \"npm --prefix backend run start\" \"npm --prefix frontend run start\"",
     "course:import": "node scripts/import-course.mjs",
+    "course:login": "node scripts/import-course.mjs --login-only",
     "typecheck": "npm --prefix frontend run typecheck && npm --prefix backend run typecheck",
     "lint": "npm --prefix frontend run lint",
     "test": "npm --prefix backend run test && npm --prefix frontend run test",

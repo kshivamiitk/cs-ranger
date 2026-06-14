@@ -3,7 +3,7 @@
 Use the importer when you have many lessons and do not want to add each one manually in the creator UI.
 
 ```bash
-npm run course:import -- ./path/to/course --api https://learnrift.site/api --token "$LEARNRIFT_ACCESS_TOKEN"
+npm run course:import -- ./path/to/course --api https://learnrift.site/api
 ```
 
 Add `--dry-run` first to validate the folder without creating anything.
@@ -15,28 +15,28 @@ npm run course:import -- ./path/to/course --api https://learnrift.site/api --yes
 
 ## Authorization
 
-The importer calls the normal LearnRift API, so it needs your logged-in access token.
-
-For Google sign-in:
-
-1. Sign in to LearnRift in Chrome.
-2. Open DevTools on `learnrift.site`.
-3. Go to Application -> Local Storage -> `https://learnrift.site`.
-4. Copy the value of `access_token`.
-5. Run:
+The importer calls the normal LearnRift API, so it needs a LearnRift app session. If no saved CLI session exists, the command opens your browser automatically:
 
 ```bash
-export LEARNRIFT_ACCESS_TOKEN='paste-token-here'
 npm run course:import -- ./path/to/course --api https://learnrift.site/api
 ```
 
-You can also get it from the console:
+Sign in with Google in the browser. LearnRift sends the session back to the importer through a temporary localhost callback, then the CLI stores it at `~/.learnrift/credentials.json` for later runs. Future imports reuse the cached session and refresh it automatically when possible.
 
-```js
-localStorage.getItem("access_token")
+You can login or refresh the saved CLI session without importing:
+
+```bash
+npm run course:login -- --api https://learnrift.site/api
 ```
 
-The token is short lived. If the import says unauthorized, refresh LearnRift, copy a fresh token, and rerun.
+Useful auth options:
+
+- `--login` opens the browser even when a cached token exists.
+- `--site <url>` sets the LearnRift web URL if it cannot be derived from `--api`.
+- `--token-file <path>` stores the CLI session somewhere other than `~/.learnrift/credentials.json`.
+- `--no-browser-login` disables the browser flow for scripts or CI.
+
+For automation, you can still pass `--token <access-token>` or set `LEARNRIFT_ACCESS_TOKEN`.
 
 ## Folder Shape
 

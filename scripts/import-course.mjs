@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
+import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
+import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
@@ -10,11 +14,18 @@ const STATIC_SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "buil
 
 function printUsage() {
   console.log(`Usage:
-  npm run course:import -- <course-folder> --token <access-token> [options]
+  npm run course:import -- <course-folder> [options]
+  npm run course:login -- --api https://learnrift.site/api
 
 Options:
   --api <url>        API base URL. Default: LEARNRIFT_API_URL, NEXT_PUBLIC_API_URL, or http://localhost:4000/api
+  --site <url>       LearnRift web URL for browser login. Default: derived from --api
+  --login            Open browser login even if a cached token exists
+  --login-only       Open browser login, cache the token, and exit
+  --no-browser-login Do not open a browser when no token/cache is available
   --title <title>    Course title override. Default: course.json title or folder name
+  --token <token>    Access token override. Usually not needed after browser login
+  --token-file <p>   Token cache file. Default: ~/.learnrift/credentials.json
   --publish          Publish after a successful import
   --dry-run          Print the import plan without creating anything
   --yes              Skip confirmation prompt
@@ -34,7 +45,9 @@ Folder shape:
         script.js
 
 Auth:
-  Set LEARNRIFT_ACCESS_TOKEN or pass --token. For Google login, copy the app access token from browser localStorage.`);
+  If no token is provided, the importer opens LearnRift in your browser, completes login,
+  and caches the app token for later runs. You can still set LEARNRIFT_ACCESS_TOKEN
+  or pass --token for automation.`);
 }
 
 function loadDotenv(file) {
@@ -56,7 +69,21 @@ function loadDotenv(file) {
 }
 
 function parseArgs(argv) {
-  const args = { folder: "", api: "", token: "", title: "", dryRun: false, yes: false, keepPartial: false, publish: false };
+  const args = {
+    folder: "",
+    api: "",
+    site: "",
+    token: "",
+    tokenFile: "",
+    title: "",
+    dryRun: false,
+    yes: false,
+    keepPartial: false,
+    publish: false,
+    login: false,
+    loginOnly: false,
+    noBrowserLogin: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
@@ -67,8 +94,13 @@ function parseArgs(argv) {
     if (arg === "--yes" || arg === "-y") { args.yes = true; continue; }
     if (arg === "--keep-partial") { args.keepPartial = true; continue; }
     if (arg === "--publish") { args.publish = true; continue; }
+    if (arg === "--login" || arg === "--browser-login") { args.login = true; continue; }
+    if (arg === "--login-only") { args.loginOnly = true; args.login = true; continue; }
+    if (arg === "--no-browser-login") { args.noBrowserLogin = true; continue; }
     if (arg === "--api") { args.api = argv[++i] || ""; continue; }
+    if (arg === "--site") { args.site = argv[++i] || ""; continue; }
     if (arg === "--token") { args.token = argv[++i] || ""; continue; }
+    if (arg === "--token-file") { args.tokenFile = argv[++i] || ""; continue; }
     if (arg === "--title") { args.title = argv[++i] || ""; continue; }
     if (!args.folder) { args.folder = arg; continue; }
     throw new Error(`Unexpected argument: ${arg}`);
@@ -80,6 +112,250 @@ function apiBase(raw) {
   const base = raw || process.env.LEARNRIFT_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
   if (base === "/api") return "http://localhost:4000/api";
   return base.replace(/\/$/, "");
+}
+
+function siteBase(raw, apiUrl) {
+  const explicit = raw || process.env.LEARNRIFT_SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || "";
+  if (explicit) return explicit.replace(/\/$/, "");
+  try {
+    const url = new URL(apiUrl);
+    if ((url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.port === "4000") {
+      return `${url.protocol}//${url.hostname}:3000`;
+    }
+    if (url.pathname.endsWith("/api")) url.pathname = url.pathname.slice(0, -4) || "/";
+    else url.pathname = "/";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "http://localhost:3000";
+  }
+}
+
+function tokenCachePath(raw) {
+  return path.resolve(raw || process.env.LEARNRIFT_TOKEN_FILE || path.join(os.homedir(), ".learnrift", "credentials.json"));
+}
+
+function tokenExpiry(token) {
+  try {
+    const payload = token.split(".")[1] || "";
+    const padded = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    const parsed = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+    return typeof parsed?.exp === "number" ? parsed.exp : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function isTokenFresh(token, skewSeconds = 60) {
+  const exp = tokenExpiry(token);
+  return exp > 0 && exp - Math.floor(Date.now() / 1000) > skewSeconds;
+}
+
+async function readCredentialStore(file) {
+  try {
+    const parsed = JSON.parse(await fs.readFile(file, "utf8"));
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch (e) {
+    if (e?.code !== "ENOENT") console.warn(`Warning: Could not read token cache ${file}: ${e.message}`);
+  }
+  return { version: 1, profiles: {} };
+}
+
+async function saveCredentials(file, apiUrl, webUrl, credentials) {
+  const store = await readCredentialStore(file);
+  store.version = 1;
+  store.profiles = store.profiles && typeof store.profiles === "object" ? store.profiles : {};
+  store.profiles[apiUrl] = {
+    apiBase: apiUrl,
+    siteBase: webUrl,
+    accessToken: credentials.accessToken,
+    refreshToken: credentials.refreshToken,
+    accessTokenExpiresAt: tokenExpiry(credentials.accessToken) || null,
+    savedAt: new Date().toISOString(),
+  };
+  await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await fs.writeFile(file, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+  await fs.chmod(file, 0o600).catch(() => {});
+}
+
+async function cachedCredentials(file, apiUrl) {
+  const store = await readCredentialStore(file);
+  return store.profiles?.[apiUrl] || null;
+}
+
+async function refreshCachedCredentials(apiUrl, file, webUrl, credentials) {
+  if (!credentials?.refreshToken) return null;
+  const res = await fetch(`${apiUrl}/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken: credentials.refreshToken }),
+  });
+  const text = await res.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch {}
+  if (!res.ok || json?.success === false) {
+    const message = json?.error?.message || text || `Token refresh failed with ${res.status}`;
+    throw new Error(message);
+  }
+  const refreshed = {
+    accessToken: json?.data?.accessToken,
+    refreshToken: json?.data?.refreshToken,
+  };
+  if (!refreshed.accessToken || !refreshed.refreshToken) throw new Error("Token refresh response was incomplete.");
+  await saveCredentials(file, apiUrl, webUrl, refreshed);
+  return refreshed;
+}
+
+function openBrowser(url) {
+  const platform = os.platform();
+  const command = platform === "darwin" ? "open" : platform === "win32" ? "cmd" : "xdg-open";
+  const args = platform === "win32" ? ["/c", "start", "", url] : [url];
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function htmlResponse(title, body) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title}</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #09090f; color: #f5f5f7; font: 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width: min(92vw, 440px); border: 1px solid #262633; border-radius: 16px; background: #14141d; padding: 28px; box-shadow: 0 20px 80px rgba(0,0,0,.35); }
+    h1 { margin: 0 0 10px; font-size: 22px; }
+    p { margin: 0; color: #a9a9b6; line-height: 1.5; }
+  </style>
+</head>
+<body><main>${body}</main></body>
+</html>`;
+}
+
+function waitForBrowserLogin(webUrl) {
+  return new Promise((resolve, reject) => {
+    const state = crypto.randomBytes(24).toString("hex");
+    let settled = false;
+    let timer = null;
+    const server = http.createServer((req, res) => {
+      const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+      if (requestUrl.pathname !== "/callback") {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not found");
+        return;
+      }
+      const receivedState = requestUrl.searchParams.get("state") || "";
+      const accessToken = requestUrl.searchParams.get("access_token") || "";
+      const refreshToken = requestUrl.searchParams.get("refresh_token") || "";
+      const error = requestUrl.searchParams.get("error") || "";
+
+      const finish = (err, credentials) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        server.close();
+        if (err) reject(err);
+        else resolve(credentials);
+      };
+
+      if (receivedState !== state) {
+        res.writeHead(400, { "Content-Type": "text/html" });
+        res.end(htmlResponse("LearnRift CLI login failed", "<h1>Login failed</h1><p>The login state did not match. Close this tab and retry the command.</p>"));
+        finish(new Error("Browser login state did not match."));
+        return;
+      }
+      if (error) {
+        res.writeHead(400, { "Content-Type": "text/html" });
+        res.end(htmlResponse("LearnRift CLI login failed", `<h1>Login failed</h1><p>${escapeHtml(error)}</p>`));
+        finish(new Error(error));
+        return;
+      }
+      if (!accessToken || !refreshToken) {
+        res.writeHead(400, { "Content-Type": "text/html" });
+        res.end(htmlResponse("LearnRift CLI login failed", "<h1>Login failed</h1><p>The browser did not return a complete LearnRift session.</p>"));
+        finish(new Error("Browser login did not return a complete LearnRift session."));
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(htmlResponse(
+        "LearnRift CLI login complete",
+        `<script>history.replaceState(null, "", "/"); setTimeout(() => window.close(), 500);</script><h1>CLI login complete</h1><p>You can return to the terminal. This tab can be closed.</p>`,
+      ));
+      finish(null, { accessToken, refreshToken });
+    });
+
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", async () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      const callback = `http://127.0.0.1:${port}/callback`;
+      const authUrl = `${webUrl}/cli-auth?callback=${encodeURIComponent(callback)}&state=${encodeURIComponent(state)}`;
+      timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          server.close();
+          reject(new Error("Timed out waiting for browser login."));
+        }
+      }, 180_000);
+      console.log("Opening LearnRift in your browser for CLI login...");
+      try {
+        await openBrowser(authUrl);
+      } catch (e) {
+        console.warn(`Warning: Could not open the browser automatically: ${e.message}`);
+      }
+      console.log(`If the browser did not open, visit:\n${authUrl}`);
+    });
+  });
+}
+
+async function resolveAccessToken(args, apiUrl, webUrl) {
+  const explicit = args.token || process.env.LEARNRIFT_ACCESS_TOKEN || process.env.ACCESS_TOKEN || "";
+  if (explicit) return explicit;
+
+  const file = tokenCachePath(args.tokenFile);
+  if (!args.login) {
+    const cached = await cachedCredentials(file, apiUrl);
+    if (cached?.accessToken && isTokenFresh(cached.accessToken)) {
+      return cached.accessToken;
+    }
+    if (cached?.refreshToken) {
+      try {
+        const refreshed = await refreshCachedCredentials(apiUrl, file, webUrl, cached);
+        console.log("Refreshed cached LearnRift CLI session.");
+        return refreshed.accessToken;
+      } catch (e) {
+        console.warn(`Warning: Cached LearnRift session could not be refreshed: ${e.message}`);
+      }
+    }
+  }
+
+  if (args.noBrowserLogin) {
+    throw new Error("Missing access token. Run with --login, remove --no-browser-login, or set LEARNRIFT_ACCESS_TOKEN.");
+  }
+
+  const credentials = await waitForBrowserLogin(webUrl);
+  await saveCredentials(file, apiUrl, webUrl, credentials);
+  console.log(`Saved LearnRift CLI session to ${file}`);
+  if (isTokenFresh(credentials.accessToken)) return credentials.accessToken;
+  const refreshed = await refreshCachedCredentials(apiUrl, file, webUrl, credentials);
+  return refreshed.accessToken;
 }
 
 function titleFromName(name) {
@@ -425,13 +701,18 @@ async function main() {
   await loadDotenv(path.resolve(".env"));
   await loadDotenv(path.resolve("backend/.env"));
   const args = parseArgs(process.argv.slice(2));
+  const baseUrl = apiBase(args.api);
+  const webUrl = siteBase(args.site, baseUrl);
+
+  if (args.loginOnly) {
+    await resolveAccessToken(args, baseUrl, webUrl);
+    console.log("LearnRift CLI login is ready.");
+    return;
+  }
+
   if (!args.folder) {
     printUsage();
     process.exit(1);
-  }
-  const token = args.token || process.env.LEARNRIFT_ACCESS_TOKEN || process.env.ACCESS_TOKEN || "";
-  if (!args.dryRun && !token) {
-    throw new Error("Missing access token. Pass --token or set LEARNRIFT_ACCESS_TOKEN.");
   }
   const plan = await buildPlan(args.folder, args.title);
   const counts = summarize(plan);
@@ -446,12 +727,13 @@ async function main() {
   }
 
   if (args.dryRun) return;
+  const token = await resolveAccessToken(args, baseUrl, webUrl);
   if (!args.yes && !(await confirm(args.publish ? "Create and publish this course now?" : "Create this course now?"))) {
     console.log("Cancelled.");
     return;
   }
 
-  const api = new ApiClient(apiBase(args.api), token);
+  const api = new ApiClient(baseUrl, token);
   const course = await importCourse(plan, api, { keepPartial: args.keepPartial, publish: args.publish });
   console.log(`Done. ${args.publish ? "Course URL" : "Draft course URL"}: /creator/courses/${course.id}/edit`);
 }
