@@ -23,7 +23,12 @@ export default function CreatorCoursesPage() {
 
   const del = useMutation({
     mutationFn: (id: string) => api.courses.deleteCourse(id),
-    onSuccess: () => { setErr(null); qc.invalidateQueries({ queryKey: ["creator-courses", creatorId] }); },
+    onSuccess: () => {
+      setErr(null);
+      qc.invalidateQueries({ queryKey: ["creator-courses", creatorId] });
+      qc.invalidateQueries({ queryKey: ["storage-usage"] });
+      qc.invalidateQueries({ queryKey: ["admin-storage-overview"] });
+    },
     // Surfaces the server's reason — e.g. "this course has N purchases — unpublish instead".
     onError: (e) => setErr(e instanceof Error ? e.message : "Could not delete the course"),
   });

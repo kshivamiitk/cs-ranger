@@ -7,6 +7,11 @@ npm run course:import -- ./path/to/course --api https://learnrift.site/api --tok
 ```
 
 Add `--dry-run` first to validate the folder without creating anything.
+Add `--yes --publish` to create and publish directly from the CLI:
+
+```bash
+npm run course:import -- ./path/to/course --api https://learnrift.site/api --yes --publish
+```
 
 ## Authorization
 
@@ -105,7 +110,7 @@ Unsupported files are skipped with warnings so repo folders containing files lik
 
 ## Atomicity
 
-The importer creates the course as a draft, then imports modules and nodes. If any API call fails, it deletes the draft course it just created by default.
+The importer creates the course as a draft, then imports modules and nodes. If `--publish` is provided, it publishes the course after every module and node is imported. If any API call fails, it deletes the draft course it just created by default.
 
 Use `--keep-partial` only when you want to inspect a failed partial import.
 

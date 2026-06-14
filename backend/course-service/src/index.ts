@@ -1,4 +1,4 @@
-import { createService, ok, fail, paginate, mock, requireAuth, requireRole, withDb, isSupabaseConfigured, publish, Topics, bustPrefix, withCache, razorpay, isRazorpayConfigured, verifyPaymentSignature, sendRealtimeNotification, writeAuditLog, getPlatformSetting, type Course } from "@cs-ranger/shared";
+import { createService, ok, fail, paginate, mock, requireAuth, requireRole, withDb, isSupabaseConfigured, publish, Topics, bustPrefix, withCache, razorpay, isRazorpayConfigured, verifyPaymentSignature, sendRealtimeNotification, writeAuditLog, getPlatformSetting, deleteStoredFile, type Course } from "@cs-ranger/shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Request as ExpressRequest } from "express";
 import { z } from "zod";
@@ -18,6 +18,9 @@ const STORAGE_FREE_MB = Number(process.env.CREATOR_STORAGE_FREE_MB || 2);
 const STORAGE_PRICE_PER_MB_INR = Number(process.env.CREATOR_STORAGE_PRICE_PER_MB_INR || 5);
 const STORAGE_DURATION_DAYS = Number(process.env.CREATOR_STORAGE_DURATION_DAYS || 30);
 const BYTES_PER_MB = 1024 * 1024;
+const PDF_BUCKET = "node-pdfs";
+const PDF_MAX_BYTES = 26_214_400; // 25 MiB, matches storage.buckets.file_size_limit
+const PDF_VIEW_TTL_SECONDS = 60 * 60; // 1h — long enough to read, short enough that a leaked URL goes stale fast.
 
 type StorageState = {
   bytes_used: number;
@@ -89,6 +92,120 @@ function storageQuotaDeltaError(state: StorageState, deltaBytes: number) {
 async function refreshCatalogSnapshot(db: SupabaseClient): Promise<void> {
   try { await db.rpc("refresh_popular_courses"); } catch { /* best effort */ }
   await bustPrefix("catalog:v2:");
+}
+
+type UploadedAssetRow = {
+  id: string;
+  owner_id: string;
+  bucket: string;
+  path: string;
+  size_bytes: number;
+  entity_type: string | null;
+  entity_id: string | null;
+};
+
+function addBytes(map: Map<string, number>, ownerId: string | null | undefined, bytes: number) {
+  if (!ownerId || !Number.isFinite(bytes) || bytes <= 0) return;
+  map.set(ownerId, (map.get(ownerId) || 0) + bytes);
+}
+
+function storageMetadataSize(item: unknown): number {
+  const metadata = (item as { metadata?: Record<string, unknown> } | null)?.metadata || {};
+  const raw = metadata.size ?? metadata.contentLength ?? metadata.content_length;
+  const size = Number(raw || 0);
+  return Number.isFinite(size) && size > 0 ? size : 0;
+}
+
+async function storageObjectSize(db: SupabaseClient, bucket: string, storagePath: string): Promise<number> {
+  const cleanPath = storagePath.replace(/^\/+/, "");
+  const parts = cleanPath.split("/");
+  const filename = parts.pop() || "";
+  const prefix = parts.join("/");
+  if (!filename) return 0;
+  try {
+    const { data } = await db.storage.from(bucket).list(prefix, { limit: 1000, search: filename });
+    const item = (data || []).find((entry: { name?: string }) => entry.name === filename);
+    return storageMetadataSize(item);
+  } catch {
+    return 0;
+  }
+}
+
+async function cleanupCourseStorage(db: SupabaseClient, courseId: string) {
+  const { data: modules } = await db.from("modules").select("id").eq("course_id", courseId);
+  const moduleIds = ((modules || []) as { id: string }[]).map((m) => m.id);
+  const { data: nodes } = moduleIds.length
+    ? await db.from("nodes").select("id, type, pdf_url").in("module_id", moduleIds)
+    : { data: [] as unknown[] };
+  const nodeRows = ((nodes || []) as { id: string; type: string; pdf_url?: string | null }[]);
+  const nodeIds = nodeRows.map((n) => n.id);
+
+  const releaseByOwner = new Map<string, number>();
+  const filesToDelete: { bucket: string; path: string }[] = [];
+  const assetRows: UploadedAssetRow[] = [];
+  const uploadedAssetIdsToDelete = new Set<string>();
+
+  for (const node of nodeRows) {
+    if (node.type !== "pdf") continue;
+    const pdfPath = pdfStoragePath(node.pdf_url);
+    if (!pdfPath) continue;
+    const { data: pdfAsset } = await db.from("uploaded_assets")
+      .select("id, owner_id, bucket, path, size_bytes, entity_type, entity_id")
+      .eq("bucket", PDF_BUCKET)
+      .eq("path", pdfPath)
+      .maybeSingle();
+    if (pdfAsset) uploadedAssetIdsToDelete.add((pdfAsset as UploadedAssetRow).id);
+    const size = Number((pdfAsset as { size_bytes?: number } | null)?.size_bytes || 0) || await storageObjectSize(db, PDF_BUCKET, pdfPath);
+    addBytes(releaseByOwner, (pdfAsset as { owner_id?: string } | null)?.owner_id || pdfPath.split("/")[0], size);
+    filesToDelete.push({ bucket: PDF_BUCKET, path: pdfPath });
+  }
+
+  const { data: courseAssets } = await db.from("uploaded_assets")
+    .select("id, owner_id, bucket, path, size_bytes, entity_type, entity_id")
+    .eq("entity_type", "course_thumbnail")
+    .eq("entity_id", courseId);
+  assetRows.push(...((courseAssets || []) as UploadedAssetRow[]));
+
+  if (nodeIds.length > 0) {
+    const { data: nodeAssets } = await db.from("uploaded_assets")
+      .select("id, owner_id, bucket, path, size_bytes, entity_type, entity_id")
+      .in("entity_type", ["node_attachment", "rich_image"])
+      .in("entity_id", nodeIds);
+    assetRows.push(...((nodeAssets || []) as UploadedAssetRow[]));
+  }
+
+  for (const asset of assetRows) {
+    filesToDelete.push({ bucket: asset.bucket, path: asset.path });
+    if (asset.entity_type === "node_attachment" || asset.entity_type === "rich_image") {
+      addBytes(releaseByOwner, asset.owner_id, Number(asset.size_bytes || 0));
+    }
+  }
+
+  for (const [ownerId, bytes] of releaseByOwner.entries()) {
+    await db.rpc("release_storage", { p_creator_id: ownerId, p_bytes: bytes });
+  }
+
+  if (assetRows.length > 0) {
+    for (const asset of assetRows) uploadedAssetIdsToDelete.add(asset.id);
+  }
+  if (uploadedAssetIdsToDelete.size > 0) {
+    await db.from("uploaded_assets").delete().in("id", [...uploadedAssetIdsToDelete]);
+  }
+
+  // Delete nodes while their module/course parents still exist. The
+  // static-website storage trigger needs those parents to find the creator.
+  if (nodeIds.length > 0) {
+    await db.from("nodes").delete().in("id", nodeIds);
+  }
+
+  for (const file of filesToDelete) {
+    await deleteStoredFile(file.bucket, file.path);
+  }
+
+  return {
+    filesDeleted: filesToDelete.length,
+    bytesReleased: [...releaseByOwner.values()].reduce((sum, bytes) => sum + bytes, 0),
+  };
 }
 
 // ─── Collaboration helpers ────────────────────────────────────────
@@ -449,7 +566,7 @@ app.post("/", requireRole("creator", "admin"), async (req, res) => {
 // so any lingering checkout record surfaces as a FK error we translate to a
 // clear message rather than a 500.
 app.delete("/:id", requireRole("creator", "admin"), async (req, res) => {
-  const courseId = req.params.id;
+  const courseId = String(req.params.id);
   const result = await withDb<{ ok: true } | { error: { status: number; message: string; code: string } }>(async (db) => {
     const role = await courseEditorRole(db, courseId, req.user!.id, req.user!.role === "admin");
     if (!role) return { error: { status: 404, message: "Course not found", code: "NOT_FOUND" } };
@@ -464,6 +581,15 @@ app.delete("/:id", requireRole("creator", "admin"), async (req, res) => {
       return { error: { status: 409, code: "HAS_PURCHASERS",
         message: `This course has ${count} purchase${count === 1 ? "" : "s"} — it can't be deleted (that would revoke paid learners' access). Unpublish it instead so no new learners can buy it.` } };
     }
+    const [{ count: paymentRecordCount }, { count: orderRecordCount }] = await Promise.all([
+      db.from("payments").select("id", { count: "exact", head: true }).eq("course_id", courseId),
+      db.from("razorpay_orders").select("id", { count: "exact", head: true }).eq("course_id", courseId),
+    ]);
+    if ((paymentRecordCount || 0) > 0 || (orderRecordCount || 0) > 0) {
+      return { error: { status: 409, code: "HAS_PAYMENT_RECORDS",
+        message: "This course has payment/order records (e.g. abandoned or in-flight checkouts) on file and can't be deleted yet. Unpublish it, or contact support to clear those records." } };
+    }
+    await cleanupCourseStorage(db, courseId);
     const { error } = await db.from("courses").delete().eq("id", courseId);
     if (error) {
       // 23503 = FK violation: a payment/order row (e.g. an abandoned or in-flight
@@ -817,6 +943,15 @@ app.post("/nodes", requireRole("creator", "admin"), async (req, res) => {
       static_website: d.static_website, quiz_payload: d.quiz_payload,
     }).select("*").single();
     if (error) throw error;
+    if (data.type === "pdf") {
+      const path = pdfStoragePath(data.pdf_url);
+      if (path) {
+        await db.from("uploaded_assets")
+          .update({ entity_type: "lesson_pdf", entity_id: data.id })
+          .eq("bucket", PDF_BUCKET)
+          .eq("path", path);
+      }
+    }
     return data;
   }, () => ({ id: `n-${Date.now()}`, ...d }));
   if (result && "ok" in result && result.ok === false) return fail(res, result.status, result.message, result.code, result.meta);
@@ -888,10 +1023,6 @@ app.delete("/nodes/:id", requireRole("creator", "admin"), async (req, res) => {
 // straight from the browser to Supabase Storage. The course-service never sees
 // the file bytes. Bucket is PRIVATE — viewing happens via a separate
 // /pdf-view-url endpoint that gates on enrollment.
-const PDF_BUCKET = "node-pdfs";
-const PDF_MAX_BYTES = 26_214_400; // 25 MiB, matches storage.buckets.file_size_limit
-const PDF_VIEW_TTL_SECONDS = 60 * 60; // 1h — long enough to read, short enough that a leaked URL goes stale fast.
-
 // Extract a storage-relative path from whatever's stored in nodes.pdf_url. Old
 // rows still have the full public CDN URL; new uploads store just the path.
 function pdfStoragePath(stored: string | null | undefined): string | null {
@@ -990,6 +1121,16 @@ app.post("/uploads/pdf-confirm", requireRole("creator", "admin"), async (req, re
   const result = await withDb(async (db) => {
     const { error } = await db.rpc("commit_storage", { p_creator_id: creatorId, p_bytes: size });
     if (error) throw error;
+    await db.from("uploaded_assets").upsert({
+      owner_id: creatorId,
+      bucket: PDF_BUCKET,
+      path,
+      original_filename: path.split("/").pop() || "lesson.pdf",
+      mime_type: "application/pdf",
+      size_bytes: size,
+      entity_type: "lesson_pdf",
+      entity_id: null,
+    }, { onConflict: "bucket,path" });
     return { committed: true } as const;
   }, null);
   if (!result) return fail(res, 503, "Storage not configured", "STORAGE_OFFLINE");

@@ -57,7 +57,7 @@ export function NodeEditor({ value, onChange }: { value: Partial<CourseNode>; on
       {type === "static_website" && <StaticEditor value={value} onChange={onChange} />}
       {type === "folder" && (
         <div className="rounded-xl border border-border bg-surface-2 p-4 text-sm text-fg-dim">
-          Folder nodes are structural curriculum groups. Add or import lessons under them with the course import CLI.
+          Folder nodes are structural curriculum groups. Add nested items from the folder actions.
         </div>
       )}
 

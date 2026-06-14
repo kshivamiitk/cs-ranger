@@ -39,8 +39,10 @@ interface DraftCourse {
   certificate_require_quiz_pass: boolean;
   certificate_template: { heading?: string; body?: string; accentColor?: string; footerNote?: string };
 }
-interface DraftNode extends Partial<CourseNode> { _local?: boolean; _localId: string }
+interface DraftNode extends Partial<CourseNode> { _local?: boolean; _localId: string; _parentLocalId?: string }
 interface DraftModule { id?: string; _localId: string; title: string; nodes: DraftNode[] }
+type DraftNodeTree = Omit<DraftNode, "children"> & { children: DraftNodeTree[]; _index: number };
+type OrderedDraftNode = DraftNodeTree & { _siblingPosition: number };
 
 // Stable client id for drag identity (and to follow selection across reorders).
 // New rows have no server id yet, so we can't key drag state off `id`.
@@ -64,11 +66,11 @@ function lessonIcon(t?: CourseNode["type"]) {
   return LESSON_TYPES.find((x) => x.type === t)?.icon ?? <FileText className="h-3.5 w-3.5" />;
 }
 
-function nodeBody(n: DraftNode, fallbackTitle: string) {
+function nodeBody(n: DraftNode, fallbackTitle: string, parentNodeId = n.parent_node_id) {
   return {
     type: (n.type || "video") as CourseNode["type"],
     title: n.title || fallbackTitle,
-    parent_node_id: n.parent_node_id,
+    parent_node_id: parentNodeId,
     duration_seconds: n.duration_seconds,
     is_free_preview: n.is_free_preview,
     video_url: n.video_url, video_provider: n.video_provider,
@@ -78,10 +80,73 @@ function nodeBody(n: DraftNode, fallbackTitle: string) {
   };
 }
 
+function buildDraftNodeTree(nodes: DraftNode[]): DraftNodeTree[] {
+  const clones = nodes.map((node, index) => ({ ...node, children: [] as DraftNodeTree[], _index: index }));
+  const byId = new Map<string, DraftNodeTree>();
+  const byLocalId = new Map<string, DraftNodeTree>();
+  for (const node of clones) {
+    if (node.id) byId.set(node.id, node);
+    byLocalId.set(node._localId, node);
+  }
+  const roots: DraftNodeTree[] = [];
+  for (const node of clones) {
+    const parent =
+      (node._parentLocalId ? byLocalId.get(node._parentLocalId) : null) ||
+      (node.parent_node_id ? byId.get(node.parent_node_id) : null);
+    if (parent && parent._localId !== node._localId) parent.children.push(node);
+    else roots.push(node);
+  }
+  const sortSiblings = (items: DraftNodeTree[]) => {
+    items.sort((a, b) => {
+      const aPos = Number.isFinite(a.position) ? Number(a.position) : a._index;
+      const bPos = Number.isFinite(b.position) ? Number(b.position) : b._index;
+      return aPos - bPos || a._index - b._index;
+    });
+    for (const item of items) sortSiblings(item.children);
+  };
+  sortSiblings(roots);
+  return roots;
+}
+
+function flattenDraftNodeTree(nodes: DraftNodeTree[], out: OrderedDraftNode[] = []): OrderedDraftNode[] {
+  nodes.forEach((node, position) => {
+    out.push({ ...node, _siblingPosition: position });
+    flattenDraftNodeTree(node.children, out);
+  });
+  return out;
+}
+
+function stripTreeFields(node: OrderedDraftNode): DraftNode {
+  const { children: _children, _index: _index, _siblingPosition: _siblingPosition, ...draftNode } = node;
+  return draftNode;
+}
+
+function descendantNodeRefs(nodes: DraftNode[], root: DraftNode): { localIds: Set<string>; serverIds: Set<string> } {
+  const localIds = new Set<string>([root._localId]);
+  const serverIds = new Set<string>();
+  if (root.id) serverIds.add(root.id);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of nodes) {
+      if (localIds.has(node._localId)) continue;
+      const isLocalChild = !!node._parentLocalId && localIds.has(node._parentLocalId);
+      const isServerChild = !!node.parent_node_id && serverIds.has(node.parent_node_id);
+      if (isLocalChild || isServerChild) {
+        localIds.add(node._localId);
+        if (node.id) serverIds.add(node.id);
+        changed = true;
+      }
+    }
+  }
+  return { localIds, serverIds };
+}
+
 /**
  * Course create + edit, VS Code–style. Left pane is a file-explorer tree
  * (course → modules → lessons); right pane edits whatever you select.
- * Modules cannot nest inside modules; lessons live exactly one level deep.
+ * Modules cannot nest inside modules; folders can nest lessons/folders inside
+ * a module so imported courses can keep their real file structure.
  *
  * Save is idempotent: existing rows are updated (not re-created), and the
  * created server ids are written back into state so re-saving never duplicates.
@@ -167,7 +232,10 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
     }));
     setModules(loaded);
     const exp: Record<string, boolean> = {};
-    for (const m of loaded) exp[m._localId] = true;
+    for (const m of loaded) {
+      exp[m._localId] = true;
+      for (const n of m.nodes) if (n.type === "folder") exp[n._localId] = true;
+    }
     setExpanded(exp);
     setHydrated(true);
   }, [editing, hydrated, existing]);
@@ -302,16 +370,22 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
     setSelected({ kind: "module", localId: id });
   }
 
-  function addLesson(moduleLocalId: string, type: CourseNode["type"]) {
+  function addLesson(moduleLocalId: string, type: CourseNode["type"], parent?: { id?: string; _localId: string }) {
     if (!guardEdit()) return;
     const mi = modules.findIndex((m) => m._localId === moduleLocalId);
     if (mi < 0) return;
     const m = modules[mi];
     const idx = m.nodes.length;
     const next = [...modules];
-    next[mi] = { ...m, nodes: [...m.nodes, { type, title: `Lesson ${idx + 1}`, _local: true, _localId: localId("n") }] };
+    const parent_node_id = parent?.id;
+    const _parentLocalId = parent?._localId;
+    const nodeLocalId = localId("n");
+    next[mi] = {
+      ...m,
+      nodes: [...m.nodes, { type, parent_node_id, _parentLocalId, title: type === "folder" ? `Folder ${idx + 1}` : `Lesson ${idx + 1}`, _local: true, _localId: nodeLocalId }],
+    };
     setModules(next);
-    setExpanded((e) => ({ ...e, [moduleLocalId]: true }));
+    setExpanded((e) => ({ ...e, [moduleLocalId]: true, ...(parent ? { [parent._localId]: true } : {}) }));
     setSelected({ kind: "lesson", moduleLocalId, nodeIndex: idx });
     setAdderOpenFor(null);
   }
@@ -334,9 +408,14 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
     if (mi < 0) return;
     const m = modules[mi];
     const n = m.nodes[nodeIndex];
-    if (!confirm(`Delete lesson "${n?.title || "Untitled"}"?`)) return;
-    if (n?.id) removedNodeIds.current.push(n.id);
-    const next = [...modules]; next[mi] = { ...m, nodes: m.nodes.filter((_, i) => i !== nodeIndex) };
+    if (!confirm(`Delete ${n?.type === "folder" ? "folder" : "lesson"} "${n?.title || "Untitled"}"?${n?.type === "folder" ? " This also deletes everything inside it." : ""}`)) return;
+    const refsToRemove = n ? descendantNodeRefs(m.nodes, n) : { localIds: new Set<string>(), serverIds: new Set<string>() };
+    for (const id of refsToRemove.serverIds) removedNodeIds.current.push(id);
+    const next = [...modules];
+    next[mi] = {
+      ...m,
+      nodes: m.nodes.filter((node, i) => i !== nodeIndex && !refsToRemove.localIds.has(node._localId)),
+    };
     setModules(next);
     if (selected.kind === "lesson" && selected.moduleLocalId === moduleLocalId) selectModule(moduleLocalId);
   }
@@ -398,6 +477,10 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
   // Persist the whole draft. Idempotent: existing rows are updated (not re-created),
   // and the created server ids are written back into state.
   async function saveAll(): Promise<string | null> {
+    const selectedNodeLocalId =
+      selected.kind === "lesson"
+        ? modules.find((m) => m._localId === selected.moduleLocalId)?.nodes[selected.nodeIndex]?._localId
+        : null;
     const basics = {
       title: course.title, subtitle: course.subtitle, description: course.description,
       category_id: course.category_id, level: course.level, language: course.language, tags: course.tags,
@@ -423,16 +506,31 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
       else { await api.courses.updateModule(mId, { title: m.title, position: mi }); }
 
       const nextNodes: DraftNode[] = [];
-      for (let ni = 0; ni < m.nodes.length; ni++) {
-        const n = m.nodes[ni];
-        const body = nodeBody(n, `Lesson ${ni + 1}`);
+      const serverIdByLocalId = new Map<string, string>();
+      for (const node of m.nodes) {
+        if (node.id) serverIdByLocalId.set(node._localId, node.id);
+      }
+
+      const orderedNodes = flattenDraftNodeTree(buildDraftNodeTree(m.nodes));
+      for (let ni = 0; ni < orderedNodes.length; ni++) {
+        const n = orderedNodes[ni];
+        const parentNodeId = n._parentLocalId
+          ? serverIdByLocalId.get(n._parentLocalId)
+          : n.parent_node_id;
+        if (n._parentLocalId && !parentNodeId) {
+          throw new Error(`Could not save "${n.title || "Untitled"}" because its parent folder is missing.`);
+        }
+        const draftNode = stripTreeFields(n);
+        const body = nodeBody(draftNode, `Lesson ${ni + 1}`, parentNodeId);
         if (!n.id) {
           const created = await api.courses.addNode({ moduleId: mId!, ...body });
           // Keep the node's stable _localId so drag identity + selection survive the save.
-          nextNodes.push({ ...created, _localId: n._localId });
+          serverIdByLocalId.set(n._localId, created.id);
+          nextNodes.push({ ...created, _localId: n._localId, _parentLocalId: n._parentLocalId });
         } else {
-          await api.courses.updateNode(n.id, { ...body, position: ni });
-          nextNodes.push({ ...n, ...body });
+          await api.courses.updateNode(n.id, { ...body, position: n._siblingPosition });
+          serverIdByLocalId.set(n._localId, n.id);
+          nextNodes.push({ ...draftNode, ...body });
         }
       }
       // Carry over the local id so currently-selected module/lesson stays selected after save.
@@ -441,6 +539,11 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
 
     setCourse((c) => ({ ...c, id: cid }));
     setModules(nextModules);
+    if (selected.kind === "lesson" && selectedNodeLocalId) {
+      const nextModule = nextModules.find((m) => m._localId === selected.moduleLocalId);
+      const nextIndex = nextModule?.nodes.findIndex((node) => node._localId === selectedNodeLocalId) ?? -1;
+      if (nextIndex >= 0) setSelected({ kind: "lesson", moduleLocalId: selected.moduleLocalId, nodeIndex: nextIndex });
+    }
     qc.invalidateQueries({ queryKey: ["creator-courses"] });
     if (cid) {
       qc.invalidateQueries({ queryKey: ["course-content", cid] });
@@ -580,12 +683,17 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
           </div>
         )}
 
-        <div className="grid gap-4 md:grid-cols-[300px_1fr]">
+        <div className="grid gap-4 md:grid-cols-[320px_minmax(0,1fr)] lg:grid-cols-[360px_minmax(0,1fr)]">
           {/* Explorer */}
           <aside className="card sticky top-4 self-start p-0">
             <div className="flex items-center justify-between rounded-t-2xl border-b border-border bg-surface-2/60 px-3 py-2">
               <span className="text-[10px] font-semibold uppercase tracking-widest text-fg-dim">Explorer</span>
-              <button onClick={addModule} title="New module" className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-fg-dim transition hover:bg-surface-2 hover:text-brand">
+              <button
+                onClick={addModule}
+                disabled={!canEdit}
+                title="New module"
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-fg-dim transition hover:bg-surface-2 hover:text-brand disabled:pointer-events-none disabled:opacity-40"
+              >
                 <Plus className="h-3.5 w-3.5" /> Module
               </button>
             </div>
@@ -597,6 +705,7 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
                 onClick={selectCourse}
                 icon={<BookOpen className="h-4 w-4 text-brand" />}
                 label={course.title || "Untitled course"}
+                variant="course"
               />
               {/* Modules — drag the grip to reorder. Order is saved on Save. */}
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onModuleDragEnd}>
@@ -604,7 +713,8 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
               {modules.map((m) => {
                 const isOpen = !!expanded[m._localId];
                 const moduleSelected = selected.kind === "module" && selected.localId === m._localId;
-                const adderOpen = adderOpenFor === m._localId;
+                const adderKey = `module:${m._localId}`;
+                const adderOpen = adderOpenFor === adderKey;
                 return (
                   <div key={m._localId}>
                     <Sortable id={m._localId} disabled={!canEdit}>
@@ -618,61 +728,35 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
                           chevron={isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                           icon={isOpen ? <FolderOpen className="h-4 w-4 text-amber-400" /> : <Folder className="h-4 w-4 text-amber-400" />}
                           label={m.title || "Untitled module"}
-                          onDelete={() => removeModule(m._localId)}
+                          variant="module"
+                          onAdd={canEdit ? () => setAdderOpenFor(adderKey) : undefined}
+                          addTitle="Add at module root"
+                          onDelete={canEdit ? () => removeModule(m._localId) : undefined}
                           dragHandle={dragHandle}
                         />
                     {isOpen && (
                       <>
-                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => onLessonDragEnd(m._localId, e)}>
-                        <SortableContext items={m.nodes.map((n) => n._localId)} strategy={verticalListSortingStrategy}>
-                        {m.nodes.map((n, ni) => {
-                          const lessonSelected =
-                            selected.kind === "lesson" && selected.moduleLocalId === m._localId && selected.nodeIndex === ni;
-                          return (
-                            <Sortable key={n._localId} id={n._localId} disabled={!canEdit}>
-                              {(dragHandle) => (
-                                <ExplorerRow
-                                  indent={2}
-                                  selected={lessonSelected}
-                                  onClick={() => selectLesson(m._localId, ni)}
-                                  icon={lessonIcon(n.type)}
-                                  label={n.title || "Untitled lesson"}
-                                  onDelete={() => removeLesson(m._localId, ni)}
-                                  dragHandle={dragHandle}
-                                />
-                              )}
-                            </Sortable>
-                          );
-                        })}
-                        </SortableContext>
-                        </DndContext>
-                        {/* Inline lesson-type picker — rendered as a tree row so it
-                            never gets clipped by sidebar overflow. */}
-                        {!adderOpen ? (
-                          <div className="pl-9 pr-3 py-1">
-                            <button
-                              onClick={() => setAdderOpenFor(m._localId)}
-                              className="inline-flex items-center gap-1 text-xs text-fg-dim transition hover:text-brand"
-                            >
-                              <Plus className="h-3 w-3" /> Add lesson
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="mx-2 my-1 ml-9 rounded-lg border border-border bg-surface-2/80 p-2">
-                            <div className="mb-1.5 flex items-center justify-between">
-                              <span className="text-[10px] font-semibold uppercase tracking-widest text-fg-dim">New lesson</span>
-                              <button onClick={() => setAdderOpenFor(null)} className="text-[10px] text-fg-dim hover:text-fg">cancel</button>
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                              {LESSON_TYPES.map((lt) => (
-                                <button key={lt.type} onClick={() => addLesson(m._localId, lt.type)}
-                                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-[11px] text-fg-dim transition hover:border-brand hover:text-fg">
-                                  {lt.icon} {lt.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                        <ExplorerNodeTree
+                          moduleLocalId={m._localId}
+                          nodes={buildDraftNodeTree(m.nodes)}
+                          selected={selected}
+                          expanded={expanded}
+                          canEdit={canEdit}
+                          onSelect={selectLesson}
+                          onToggle={toggleExpand}
+                          onDelete={removeLesson}
+                          onAddChild={addLesson}
+                          adderOpenFor={adderOpenFor}
+                          setAdderOpenFor={setAdderOpenFor}
+                        />
+                        {adderOpen ? (
+                          <AddNodePicker
+                            open={adderOpen}
+                            onClose={() => setAdderOpenFor(null)}
+                            onAdd={(type) => addLesson(m._localId, type)}
+                            indent={2}
+                          />
+                        ) : null}
                       </>
                     )}
                       </>
@@ -714,6 +798,9 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
                 key={`${selectedModule._localId}-${selected.nodeIndex}`}
                 value={selectedLesson}
                 onChange={(n) => updateLesson(selectedModule._localId, selected.nodeIndex, n)}
+                onAddChild={selectedLesson.type === "folder" && canEdit
+                  ? (type) => addLesson(selectedModule._localId, type, selectedLesson)
+                  : undefined}
               />
             )}
           </section>
@@ -727,44 +814,201 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
 // ──────────────────────────── Explorer row ────────────────────────────
 
 function ExplorerRow({
-  indent, selected, onClick, onChevronClick, chevron, icon, label, onDelete, dragHandle,
+  indent, selected, onClick, onChevronClick, chevron, icon, label, onAdd, addTitle, onDelete, dragHandle, variant = "lesson",
 }: {
-  indent: 0 | 1 | 2;
+  indent: number;
   selected: boolean;
   onClick: () => void;
   onChevronClick?: () => void;
   chevron?: React.ReactNode;
   icon: React.ReactNode;
   label: string;
+  onAdd?: () => void;
+  addTitle?: string;
   onDelete?: () => void;
   dragHandle?: React.ReactNode;
+  variant?: "course" | "module" | "folder" | "lesson";
 }) {
-  const padLeft = indent === 0 ? "pl-3" : indent === 1 ? "pl-3" : "pl-9";
+  const isCourse = variant === "course";
+  const isModule = variant === "module";
+  const isFolder = variant === "folder";
   return (
     <div
       className={cn(
-        "group flex items-center gap-1.5 pr-2 py-1 cursor-pointer transition",
-        padLeft,
-        selected ? "bg-brand/10 text-fg border-l-2 border-brand" : "border-l-2 border-transparent hover:bg-surface-2/60",
+        "group relative mx-1 flex min-h-8 cursor-pointer items-center gap-1.5 rounded-lg py-1 pr-16 transition",
+        selected ? "bg-brand/15 text-fg ring-1 ring-brand/35" : "text-fg-dim hover:bg-surface-2/70 hover:text-fg",
+        isCourse && "font-semibold text-fg",
+        isModule && "font-medium text-fg",
+        isFolder && "text-[13px]",
       )}
+      style={{ paddingLeft: indent === 0 ? 12 : 8 + indent * 16 }}
       onClick={onClick}
     >
       {dragHandle}
-      {indent === 1 ? (
+      {onChevronClick ? (
         <button
           onClick={(e) => { e.stopPropagation(); onChevronClick?.(); }}
-          className="flex h-4 w-4 items-center justify-center text-fg-dim hover:text-fg"
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-fg-dim transition hover:bg-surface hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-brand/60"
         >{chevron}</button>
-      ) : indent === 2 && !dragHandle ? <span className="w-4" /> : null}
-      <span className="shrink-0">{icon}</span>
-      <span className="truncate flex-1">{label}</span>
-      {onDelete && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="opacity-0 group-hover:opacity-100 text-fg-dim hover:text-danger transition"
-          title="Delete"
-        ><Trash2 className="h-3.5 w-3.5" /></button>
+      ) : indent > 0 && !dragHandle ? <span className="h-5 w-5 shrink-0" /> : null}
+      <span className={cn("shrink-0", isFolder && "opacity-90")}>{icon}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {(onAdd || onDelete) ? (
+        <span className="absolute right-2 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+          {onAdd ? (
+            <ExplorerActionButton title={addTitle || "Add"} onClick={onAdd}>
+              <Plus className="h-3.5 w-3.5" />
+            </ExplorerActionButton>
+          ) : null}
+          {onDelete ? (
+            <ExplorerActionButton title="Delete" onClick={onDelete} danger>
+              <Trash2 className="h-3.5 w-3.5" />
+            </ExplorerActionButton>
+          ) : null}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function ExplorerActionButton({
+  title, onClick, danger, children,
+}: {
+  title: string;
+  onClick: () => void;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className={cn(
+        "flex h-6 w-6 items-center justify-center rounded-md bg-surface/90 text-fg-dim shadow-sm ring-1 ring-border transition hover:text-brand focus:outline-none focus-visible:ring-1 focus-visible:ring-brand/70",
+        danger && "hover:text-danger focus-visible:ring-danger/60",
       )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ExplorerNodeTree({
+  moduleLocalId, nodes, selected, expanded, canEdit, onSelect, onToggle, onDelete, onAddChild, adderOpenFor, setAdderOpenFor, depth = 2,
+}: {
+  moduleLocalId: string;
+  nodes: DraftNodeTree[];
+  selected: Selection;
+  expanded: Record<string, boolean>;
+  canEdit: boolean;
+  onSelect: (moduleLocalId: string, nodeIndex: number) => void;
+  onToggle: (localId: string) => void;
+  onDelete: (moduleLocalId: string, nodeIndex: number) => void;
+  onAddChild: (moduleLocalId: string, type: CourseNode["type"], parent?: { id?: string; _localId: string }) => void;
+  adderOpenFor: string | null;
+  setAdderOpenFor: React.Dispatch<React.SetStateAction<string | null>>;
+  depth?: number;
+}) {
+  return (
+    <>
+      {nodes.map((node) => {
+        const isFolder = node.type === "folder";
+        const isOpen = !!expanded[node._localId];
+        const adderKey = `folder:${node._localId}`;
+        const lessonSelected =
+          selected.kind === "lesson" && selected.moduleLocalId === moduleLocalId && selected.nodeIndex === node._index;
+        return (
+          <div key={node._localId}>
+            <ExplorerRow
+              indent={depth}
+              selected={lessonSelected}
+              onClick={() => onSelect(moduleLocalId, node._index)}
+              onChevronClick={isFolder ? () => onToggle(node._localId) : undefined}
+              chevron={isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              icon={isFolder ? (isOpen ? <FolderOpen className="h-4 w-4 text-fg-dim" /> : <Folder className="h-4 w-4 text-fg-dim" />) : lessonIcon(node.type)}
+              label={node.title || (isFolder ? "Untitled folder" : "Untitled lesson")}
+              variant={isFolder ? "folder" : "lesson"}
+              onAdd={isFolder && canEdit ? () => setAdderOpenFor(adderKey) : undefined}
+              addTitle="Add inside"
+              onDelete={canEdit ? () => onDelete(moduleLocalId, node._index) : undefined}
+            />
+            {isFolder && isOpen ? (
+              <div className="relative">
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute bottom-1 top-1 w-px bg-fg-dim/25"
+                  style={{ left: 20 + depth * 16 }}
+                />
+                <ExplorerNodeTree
+                  moduleLocalId={moduleLocalId}
+                  nodes={node.children}
+                  selected={selected}
+                  expanded={expanded}
+                  canEdit={canEdit}
+                  onSelect={onSelect}
+                  onToggle={onToggle}
+                  onDelete={onDelete}
+                  onAddChild={onAddChild}
+                  adderOpenFor={adderOpenFor}
+                  setAdderOpenFor={setAdderOpenFor}
+                  depth={depth + 1}
+                />
+                {adderOpenFor === adderKey ? (
+                  <AddNodePicker
+                    open
+                    onClose={() => setAdderOpenFor(null)}
+                    onAdd={(type) => onAddChild(moduleLocalId, type, node)}
+                    indent={depth + 1}
+                    compact
+                  />
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function AddNodePicker({
+  open, onClose, onAdd, indent, compact = false,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onAdd: (type: CourseNode["type"]) => void;
+  indent: number;
+  compact?: boolean;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="mx-2 my-1 rounded-lg border border-border bg-surface-2/90 p-2" style={{ marginLeft: 8 + indent * 16 }}>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-fg-dim">New item</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded px-1 text-[10px] text-fg-dim hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-brand/60"
+        >
+          cancel
+        </button>
+      </div>
+      <div className={cn("grid gap-1", compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3")}>
+        {LESSON_TYPES.map((lt) => (
+          <button
+            key={lt.type}
+            type="button"
+            onClick={() => onAdd(lt.type)}
+            className="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-left text-[11px] text-fg-dim transition hover:border-brand hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-brand/60"
+          >
+            <span className="shrink-0">{lt.icon}</span>
+            <span className="truncate">{lt.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -786,12 +1030,14 @@ function Sortable({
     zIndex: isDragging ? 20 : undefined,
     position: isDragging ? "relative" : undefined,
   };
-  const handle = disabled ? null : (
+  const handle = disabled ? (
+    <span className="h-5 w-5 shrink-0" aria-hidden="true" />
+  ) : (
     <button
       {...attributes}
       {...listeners}
       onClick={(e) => e.stopPropagation()}
-      className="flex h-4 w-4 shrink-0 cursor-grab items-center justify-center text-fg-dim opacity-40 transition hover:text-fg group-hover:opacity-100 active:cursor-grabbing"
+      className="flex h-5 w-5 shrink-0 cursor-grab items-center justify-center rounded-md text-fg-dim opacity-30 transition hover:bg-surface hover:text-fg focus:outline-none focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-brand/60 group-hover:opacity-100 active:cursor-grabbing"
       title="Drag to reorder"
       aria-label="Drag to reorder"
     ><GripVertical className="h-3.5 w-3.5" /></button>
@@ -975,6 +1221,7 @@ function ModulePanel({
   onSelectLesson: (idx: number) => void;
   onAddLesson: (t: CourseNode["type"]) => void;
 }) {
+  const lessonCount = m.nodes.filter((node) => node.type !== "folder").length;
   return (
     <div className="space-y-4">
       <Section title="Module">
@@ -982,20 +1229,11 @@ function ModulePanel({
           <input value={m.title} onChange={(e) => onTitleChange(e.target.value)} className="input" placeholder="e.g. Foundations" />
         </Field>
       </Section>
-      <Section title={`Lessons (${m.nodes.length})`}>
+      <Section title={`Lessons (${lessonCount})`}>
         {m.nodes.length === 0 ? (
           <p className="text-xs text-fg-dim">No lessons yet. Add one using a button below — or via <span className="text-brand">+ Add lesson</span> in the explorer.</p>
         ) : (
-          <ul className="space-y-1">
-            {m.nodes.map((n, ni) => (
-              <li key={n.id || ni}>
-                <button onClick={() => onSelectLesson(ni)} className="flex w-full items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-left text-sm transition hover:border-brand">
-                  {lessonIcon(n.type)} <span className="flex-1 truncate">{n.title || `Lesson ${ni + 1}`}</span>
-                  <span className="text-[10px] uppercase tracking-widest text-fg-dim">{n.type || "video"}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <ModuleNodeTree nodes={buildDraftNodeTree(m.nodes)} onSelectLesson={onSelectLesson} />
         )}
         <div className="flex flex-wrap gap-2 pt-2">
           {LESSON_TYPES.map((lt) => (
@@ -1009,12 +1247,56 @@ function ModulePanel({
   );
 }
 
+function ModuleNodeTree({ nodes, onSelectLesson, depth = 0 }: { nodes: DraftNodeTree[]; onSelectLesson: (idx: number) => void; depth?: number }) {
+  return (
+    <ul className="space-y-1">
+      {nodes.map((n) => (
+        <li key={n.id || n._localId}>
+          <button
+            onClick={() => onSelectLesson(n._index)}
+            className="flex w-full items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-left text-sm transition hover:border-brand"
+            style={{ paddingLeft: 12 + depth * 18 }}
+          >
+            {lessonIcon(n.type)} <span className="flex-1 truncate">{n.title || (n.type === "folder" ? "Untitled folder" : `Lesson ${n._index + 1}`)}</span>
+            <span className="text-[10px] uppercase tracking-widest text-fg-dim">{n.type || "video"}</span>
+          </button>
+          {n.children.length > 0 ? <ModuleNodeTree nodes={n.children} onSelectLesson={onSelectLesson} depth={depth + 1} /> : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // ──────────────────────────── Lesson panel ────────────────────────────
 
-function LessonPanel({ value, onChange }: { value: DraftNode; onChange: (n: Partial<CourseNode>) => void }) {
+function LessonPanel({
+  value, onChange, onAddChild,
+}: {
+  value: DraftNode;
+  onChange: (n: Partial<CourseNode>) => void;
+  onAddChild?: (type: CourseNode["type"]) => void;
+}) {
   return (
-    <div className="card">
-      <NodeEditor value={value} onChange={onChange} />
+    <div className="space-y-4">
+      <div className="card">
+        <NodeEditor value={value} onChange={onChange} />
+      </div>
+      {value.type === "folder" && onAddChild ? (
+        <Section title="Add inside this folder">
+          <div className="flex flex-wrap gap-2">
+            {LESSON_TYPES.map((lt) => (
+              <button
+                key={lt.type}
+                type="button"
+                onClick={() => onAddChild(lt.type)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-xs text-fg-dim transition hover:border-brand hover:text-fg focus:outline-none focus-visible:ring-1 focus-visible:ring-brand/60"
+              >
+                <Plus className="h-3 w-3" /> {lt.icon} {lt.label}
+              </button>
+            ))}
+          </div>
+        </Section>
+      ) : null}
     </div>
   );
 }

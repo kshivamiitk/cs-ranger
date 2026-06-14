@@ -15,6 +15,7 @@ function printUsage() {
 Options:
   --api <url>        API base URL. Default: LEARNRIFT_API_URL, NEXT_PUBLIC_API_URL, or http://localhost:4000/api
   --title <title>    Course title override. Default: course.json title or folder name
+  --publish          Publish after a successful import
   --dry-run          Print the import plan without creating anything
   --yes              Skip confirmation prompt
   --keep-partial     Do not delete the draft course if import fails
@@ -55,7 +56,7 @@ function loadDotenv(file) {
 }
 
 function parseArgs(argv) {
-  const args = { folder: "", api: "", token: "", title: "", dryRun: false, yes: false, keepPartial: false };
+  const args = { folder: "", api: "", token: "", title: "", dryRun: false, yes: false, keepPartial: false, publish: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
@@ -65,6 +66,7 @@ function parseArgs(argv) {
     if (arg === "--dry-run") { args.dryRun = true; continue; }
     if (arg === "--yes" || arg === "-y") { args.yes = true; continue; }
     if (arg === "--keep-partial") { args.keepPartial = true; continue; }
+    if (arg === "--publish") { args.publish = true; continue; }
     if (arg === "--api") { args.api = argv[++i] || ""; continue; }
     if (arg === "--token") { args.token = argv[++i] || ""; continue; }
     if (arg === "--title") { args.title = argv[++i] || ""; continue; }
@@ -388,6 +390,10 @@ async function importCourse(plan, api, opts) {
       console.log(`  Module: ${createdModule.title}`);
       for (const item of mod.items) await createItem(api, createdModule.id, item, null, 2);
     }
+    if (opts.publish) {
+      const published = await api.post(`/courses/${course.id}/publish`, {});
+      console.log(`Published course: ${published.status}`);
+    }
     return course;
   } catch (e) {
     if (course?.id && !opts.keepPartial) {
@@ -440,14 +446,14 @@ async function main() {
   }
 
   if (args.dryRun) return;
-  if (!args.yes && !(await confirm("Create this course now?"))) {
+  if (!args.yes && !(await confirm(args.publish ? "Create and publish this course now?" : "Create this course now?"))) {
     console.log("Cancelled.");
     return;
   }
 
   const api = new ApiClient(apiBase(args.api), token);
-  const course = await importCourse(plan, api, { keepPartial: args.keepPartial });
-  console.log(`Done. Draft course URL: /creator/courses/${course.id}/edit`);
+  const course = await importCourse(plan, api, { keepPartial: args.keepPartial, publish: args.publish });
+  console.log(`Done. ${args.publish ? "Course URL" : "Draft course URL"}: /creator/courses/${course.id}/edit`);
 }
 
 main().catch((e) => {
