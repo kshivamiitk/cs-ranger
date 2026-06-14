@@ -240,20 +240,23 @@ interface CertificateDetail {
 
 async function loadCertificateDetail(db: SupabaseClient, certId: string): Promise<CertificateDetail | null> {
   const { data: cert } = await db.from("certificates")
-    .select("*, courses(title, creator_id, certificate_template), profiles!certificates_learner_id_fkey(display_name)")
+    .select("id, learner_id, course_id, pdf_url, verification_token, issued_at, courses(title, creator_id, certificate_template)")
     .eq("id", certId).maybeSingle();
   if (!cert) return null;
-  type Row = { id: string; learner_id: string; course_id: string; pdf_url: string | null; verification_token: string; issued_at: string; courses?: { title?: string; creator_id?: string; certificate_template?: CertificateTemplate | null } | null; profiles?: { display_name?: string } | null };
+  type Row = { id: string; learner_id: string; course_id: string; pdf_url: string | null; verification_token: string; issued_at: string; courses?: { title?: string; creator_id?: string; certificate_template?: CertificateTemplate | null } | null };
   const r = cert as Row;
-  let creatorName = "LearnRift Creator";
-  if (r.courses?.creator_id) {
-    const { data: creator } = await db.from("profiles").select("display_name").eq("user_id", r.courses.creator_id).maybeSingle();
-    creatorName = creator?.display_name || creatorName;
-  }
+  const [{ data: creator }, { data: learner }] = await Promise.all([
+    r.courses?.creator_id
+      ? db.from("profiles").select("display_name").eq("user_id", r.courses.creator_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    db.from("profiles").select("display_name").eq("user_id", r.learner_id).maybeSingle(),
+  ]);
   return {
     id: r.id, learner_id: r.learner_id, course_id: r.course_id, pdf_url: r.pdf_url,
     verification_token: r.verification_token, issued_at: r.issued_at,
-    courseTitle: r.courses?.title || "Course", creatorName, learnerName: r.profiles?.display_name || "Learner",
+    courseTitle: r.courses?.title || "Course",
+    creatorName: creator?.display_name || "LearnRift Creator",
+    learnerName: learner?.display_name || "Learner",
     template: r.courses?.certificate_template || {},
   };
 }
@@ -347,10 +350,18 @@ app.get("/certificates/verify/:token", async (req, res) => {
   // internal learner_id/course_id or other certificate columns.
   const data = await withDb(async (db) => {
     const { data: cert } = await db.from("certificates")
-      .select("id, verification_token, issued_at, courses(title), profiles!certificates_learner_id_fkey(display_name, username)")
+      .select("id, learner_id, verification_token, issued_at, courses(title)")
       .eq("verification_token", req.params.token).maybeSingle();
     if (!cert) return null;
-    return cert;
+    const row = cert as {
+      id: string;
+      learner_id: string;
+      verification_token: string;
+      issued_at: string;
+      courses?: { title?: string } | null;
+    };
+    const { data: profile } = await db.from("profiles").select("display_name, username").eq("user_id", row.learner_id).maybeSingle();
+    return { id: row.id, verification_token: row.verification_token, issued_at: row.issued_at, courses: row.courses, profiles: profile || null };
   }, null);
   if (!data) return fail(res, 404, "Certificate not found", "NOT_FOUND");
   ok(res, data);
