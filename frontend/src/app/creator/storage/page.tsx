@@ -113,7 +113,7 @@ export default function CreatorStoragePage() {
           </span>
           <div>
             <h1 className="heading-2">Storage</h1>
-            <p className="text-sm text-fg-dim">PDF uploads count against your quota. Free baseline + any purchased extra MB.</p>
+            <p className="text-sm text-fg-dim">PDFs, attachments, rich images, and static sites count against your quota. Free baseline + any purchased extra MB.</p>
           </div>
         </div>
 

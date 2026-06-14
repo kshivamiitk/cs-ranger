@@ -11,9 +11,9 @@ import { sortCourseTree, type WithPosition } from "./ordering.js";
 
 // ─── Creator storage quota ────────────────────────────────────────
 // Tunable per deployment via root .env. Hard cap on lesson-PDF uploads
-// per creator. The counter lives in creator_storage.bytes_used, kept
-// in sync by a trigger on storage.objects — so the per-upload check
-// is one indexed primary-key lookup (O(1)).
+// per creator. The counter lives in creator_storage.bytes_used, maintained by
+// explicit app-side commits for uploaded files and a nodes trigger for static
+// website payloads — so the per-upload check is one indexed primary-key lookup.
 const STORAGE_FREE_MB = Number(process.env.CREATOR_STORAGE_FREE_MB || 2);
 const STORAGE_PRICE_PER_MB_INR = Number(process.env.CREATOR_STORAGE_PRICE_PER_MB_INR || 5);
 const STORAGE_DURATION_DAYS = Number(process.env.CREATOR_STORAGE_DURATION_DAYS || 30);

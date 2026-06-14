@@ -141,7 +141,7 @@ export default function CreatorGuidePage() {
           <div className="card">
             <h3 className="heading-3 flex items-center gap-2"><HardDrive className="h-5 w-5 text-brand" /> Storage</h3>
             <ul className="mt-3 space-y-2 text-sm text-fg-dim">
-              <li>PDFs and lesson attachments use your storage quota (you start with a small free allotment and can buy more anytime).</li>
+              <li>PDFs, static sites, rich images, and lesson attachments use your storage quota (you start with a small free allotment and can buy more anytime).</li>
               <li>Video lessons live on our CDN separately, so they <strong className="text-fg">don&apos;t</strong> count against storage.</li>
               <li>Check your usage on the Storage page in the creator nav.</li>
             </ul>
