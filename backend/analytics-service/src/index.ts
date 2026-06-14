@@ -74,7 +74,7 @@ app.get("/creator/:creatorId/courses/:courseId", requireAuth, async (req, res) =
       const [{ data: course }, { data: enrollments }, { data: nodes }, { data: payments }] = await Promise.all([
         db.from("courses").select("title, enrollment_count, rating_avg, rating_count, price, discounted_price").eq("id", courseId).maybeSingle(),
         db.from("enrollments").select("enrolled_at").eq("course_id", courseId).gte("enrolled_at", since.toISOString()),
-        db.from("nodes").select("id, title, modules!inner(course_id)").eq("modules.course_id", courseId),
+        db.from("nodes").select("id, title, modules!inner(course_id)").eq("modules.course_id", courseId).neq("type", "folder"),
         db.from("payments").select("amount, status").eq("course_id", courseId),
       ]);
       // Per-node completion counts.

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, ListChecks, Play, FileType, Code2, Plus, Trash2, Upload, Loader2, AlertCircle, Paperclip, FileJson, Copy, Check, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
+import { FileText, ListChecks, Play, FileType, Code2, Plus, Trash2, Upload, Loader2, AlertCircle, Paperclip, FileJson, Copy, Check, ChevronDown, ChevronRight, ExternalLink, Folder } from "lucide-react";
 import { api, type CourseNode, type VideoChapter, type VideoSubtitle } from "@/lib/api";
 import { composeStaticDoc, openStaticLessonInNewTab } from "@/lib/staticLesson";
 import { FileUpload } from "@/components/common/FileUpload";
@@ -18,6 +18,7 @@ const TYPE_META: Record<CourseNode["type"], { icon: React.ReactNode; label: stri
   quiz: { icon: <ListChecks className="h-4 w-4" />, label: "Quiz" },
   pdf: { icon: <FileType className="h-4 w-4" />, label: "PDF" },
   static_website: { icon: <Code2 className="h-4 w-4" />, label: "Static Website" },
+  folder: { icon: <Folder className="h-4 w-4" />, label: "Folder" },
 };
 
 export function NodeEditor({ value, onChange }: { value: Partial<CourseNode>; onChange: (next: Partial<CourseNode>) => void }) {
@@ -54,12 +55,17 @@ export function NodeEditor({ value, onChange }: { value: Partial<CourseNode>; on
       {type === "pdf" && <PdfEditor value={value} onChange={onChange} />}
       {type === "quiz" && <QuizEditor value={value} onChange={onChange} />}
       {type === "static_website" && <StaticEditor value={value} onChange={onChange} />}
-
-      {value.id ? (
-        <AttachmentsEditor nodeId={value.id} />
-      ) : (
-        <p className="text-[11px] text-fg-dim">Save the course once to attach downloadable resources to this lesson.</p>
+      {type === "folder" && (
+        <div className="rounded-xl border border-border bg-surface-2 p-4 text-sm text-fg-dim">
+          Folder nodes are structural curriculum groups. Add or import lessons under them with the course import CLI.
+        </div>
       )}
+
+      {value.id && type !== "folder" ? (
+        <AttachmentsEditor nodeId={value.id} />
+      ) : type !== "folder" ? (
+        <p className="text-[11px] text-fg-dim">Save the course once to attach downloadable resources to this lesson.</p>
+      ) : null}
     </div>
   );
 }

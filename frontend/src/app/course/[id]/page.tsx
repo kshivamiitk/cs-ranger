@@ -4,13 +4,15 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Star, Clock, Users, Award, Globe, BarChart3, Bookmark, BookmarkCheck, Lock, Play, FileText, ListChecks, FileType, Loader2, AlertCircle, Pencil, Check, Flag } from "lucide-react";
+import { Star, Clock, Users, Award, Globe, BarChart3, Bookmark, BookmarkCheck, Lock, Play, FileText, ListChecks, FileType, Loader2, AlertCircle, Pencil, Check, Flag, Folder } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { Avatar } from "@/components/common/Avatar";
 import { FollowButton } from "@/components/common/FollowButton";
 import { useRazorpayCheckout } from "@/components/common/RazorpayCheckout";
 import { api } from "@/lib/api";
+import type { CourseNode } from "@/lib/api";
+import { buildNodeTree, countPlayableNodes, firstPlayableNode } from "@/lib/courseTree";
 import { useApp } from "@/app/providers";
 import { durationFromSeconds, formatCompact, formatINR, relativeTime, avatarUrl } from "@/lib/utils";
 
@@ -105,12 +107,12 @@ export default function CourseDetailPage() {
   }
 
   const { course, creator, reviews } = data;
-  const totalNodes = course.modules?.reduce((s, m) => s + (m.nodes?.length || 0), 0) || 0;
+  const totalNodes = course.modules?.reduce((s, m) => s + countPlayableNodes(m.nodes || []), 0) || 0;
   const isEnrolled = !!enrollment?.enrolled;
   const isOwner = !!user && course.creator_id === (user.user_id || user.id);
   // First lesson id is needed for both "Continue Learning" (when last_node_id is
   // missing) and the disabled-empty-course state.
-  const firstNodeId = course.modules?.find((m) => (m.nodes?.length || 0) > 0)?.nodes?.[0]?.id;
+  const firstNodeId = firstPlayableNode(course.modules || [])?.id;
   const continueNodeId = enrollment?.last_node_id || firstNodeId;
 
   return (
@@ -240,39 +242,12 @@ export default function CourseDetailPage() {
                 <summary className="flex cursor-pointer list-none items-center justify-between">
                   <div>
                     <p className="font-display font-semibold">{m.title}</p>
-                    <p className="text-xs text-fg-dim">{m.nodes?.length || 0} lessons</p>
+                    <p className="text-xs text-fg-dim">{countPlayableNodes(m.nodes || [])} lessons</p>
                   </div>
                   <span className="text-brand transition group-open:rotate-45">+</span>
                 </summary>
                 <div className="mt-4 divide-y divide-border">
-                  {(m.nodes || []).map((n) => {
-                    // A lesson is openable if it's a free preview, or the viewer is
-                    // enrolled, or they own the course. Free-preview lessons must be
-                    // clickable for non-enrolled visitors — otherwise the "Preview"
-                    // badge is a dead end.
-                    const canOpen = n.is_free_preview || isEnrolled || isOwner;
-                    const inner = (
-                      <>
-                        <NodeTypeIcon type={n.type} />
-                        <span className="flex-1">{n.title}</span>
-                        {n.is_free_preview ? (
-                          <span className="chip text-success border-success/30">Preview</span>
-                        ) : !isEnrolled ? (
-                          <Lock className="h-3.5 w-3.5 text-fg-dim" />
-                        ) : null}
-                        <span className="text-xs text-fg-dim">{durationFromSeconds(n.duration_seconds || 0)}</span>
-                      </>
-                    );
-                    return canOpen ? (
-                      <Link key={n.id} href={`/course/${course.id}/learn/${n.id}`} className="flex items-center gap-3 py-2.5 text-sm transition hover:text-brand">
-                        {inner}
-                      </Link>
-                    ) : (
-                      <div key={n.id} className="flex items-center gap-3 py-2.5 text-sm">
-                        {inner}
-                      </div>
-                    );
-                  })}
+                  <CurriculumRows nodes={buildNodeTree(m.nodes || [])} courseId={course.id} isEnrolled={isEnrolled} isOwner={isOwner} />
                 </div>
               </details>
             ))}
@@ -367,8 +342,66 @@ function NodeTypeIcon({ type }: { type: string }) {
     quiz: <ListChecks className="h-3.5 w-3.5" />,
     pdf: <FileType className="h-3.5 w-3.5" />,
     static_website: <FileText className="h-3.5 w-3.5" />,
+    folder: <Folder className="h-3.5 w-3.5" />,
   };
   return <span className="text-fg-dim">{map[type] ?? <FileText className="h-3.5 w-3.5" />}</span>;
+}
+
+function CurriculumRows({
+  nodes, courseId, isEnrolled, isOwner, depth = 0,
+}: {
+  nodes: CourseNode[];
+  courseId: string;
+  isEnrolled: boolean;
+  isOwner: boolean;
+  depth?: number;
+}) {
+  return (
+    <>
+      {nodes.map((n) => {
+        if (n.type === "folder") {
+          return (
+            <div key={n.id}>
+              <div className="flex items-center gap-3 py-2.5 text-sm font-medium text-fg-dim" style={{ paddingLeft: depth * 16 }}>
+                <NodeTypeIcon type={n.type} />
+                <span className="flex-1">{n.title}</span>
+              </div>
+              {n.children?.length ? (
+                <CurriculumRows nodes={n.children} courseId={courseId} isEnrolled={isEnrolled} isOwner={isOwner} depth={depth + 1} />
+              ) : null}
+            </div>
+          );
+        }
+
+        // A lesson is openable if it's a free preview, or the viewer is
+        // enrolled, or they own the course. Free-preview lessons must be
+        // clickable for non-enrolled visitors — otherwise the "Preview"
+        // badge is a dead end.
+        const canOpen = n.is_free_preview || isEnrolled || isOwner;
+        const inner = (
+          <>
+            <NodeTypeIcon type={n.type} />
+            <span className="flex-1">{n.title}</span>
+            {n.is_free_preview ? (
+              <span className="chip text-success border-success/30">Preview</span>
+            ) : !isEnrolled ? (
+              <Lock className="h-3.5 w-3.5 text-fg-dim" />
+            ) : null}
+            <span className="text-xs text-fg-dim">{durationFromSeconds(n.duration_seconds || 0)}</span>
+          </>
+        );
+        return canOpen ? (
+          <Link key={n.id} href={`/course/${courseId}/learn/${n.id}`} className="flex items-center gap-3 py-2.5 text-sm transition hover:text-brand" style={{ paddingLeft: depth * 16 }}>
+            {inner}
+          </Link>
+        ) : (
+          <div key={n.id} className="flex items-center gap-3 py-2.5 text-sm" style={{ paddingLeft: depth * 16 }}>
+            {inner}
+          </div>
+        );
+      })}
+    </>
+  );
 }
 
 /**

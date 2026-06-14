@@ -629,13 +629,14 @@ export interface Module { id: string; course_id?: string; title: string; positio
 export interface VideoChapter { title: string; seconds: number }
 export interface VideoSubtitle { label: string; lang: string; url: string; format: "vtt" | "srt" }
 export interface CourseNode {
-  id: string; module_id?: string; type: "video" | "markdown" | "quiz" | "pdf" | "static_website";
+  id: string; module_id?: string; parent_node_id?: string | null; type: "video" | "markdown" | "quiz" | "pdf" | "static_website" | "folder";
   title: string; position: number; duration_seconds?: number; is_free_preview?: boolean;
   video_url?: string; video_provider?: "youtube" | "gdrive";
   video_chapters?: VideoChapter[] | null; video_subtitles?: VideoSubtitle[] | null;
   markdown?: string; pdf_url?: string;
   static_website?: { html: string; css: string; js: string };
   quiz_payload?: { timerSeconds?: number; passingPercent?: number; questions: { id: string; prompt: string; options: string[]; correctIndex: number; explanation?: string }[] };
+  children?: CourseNode[];
 }
 export interface NodeCreate extends Omit<Partial<CourseNode>, "id" | "position"> { moduleId: string; type: CourseNode["type"]; title: string }
 

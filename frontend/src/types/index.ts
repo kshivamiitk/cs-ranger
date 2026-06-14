@@ -19,13 +19,14 @@ export interface User {
   createdAt: string;
 }
 
-export type NodeType = "video" | "markdown" | "quiz" | "pdf" | "static_website";
+export type NodeType = "video" | "markdown" | "quiz" | "pdf" | "static_website" | "folder";
 
 export interface CourseNode {
   id: string;
   moduleId: string;
   type: NodeType;
   title: string;
+  parentNodeId?: string | null;
   durationSeconds?: number;
   position: number;
   isFreePreview?: boolean;

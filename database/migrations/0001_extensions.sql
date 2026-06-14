@@ -9,7 +9,7 @@ do $$ begin
   create type user_role        as enum ('learner', 'creator', 'admin');
   create type course_status    as enum ('draft', 'under_review', 'published', 'archived');
   create type course_level     as enum ('Beginner', 'Intermediate', 'Advanced', 'All Levels');
-  create type node_type        as enum ('video', 'markdown', 'quiz', 'pdf', 'static_website');
+  create type node_type        as enum ('video', 'markdown', 'quiz', 'pdf', 'static_website', 'folder');
   create type payment_status   as enum ('pending', 'success', 'failed', 'refunded');
   create type ledger_type      as enum ('enrollment_credit', 'commission_debit', 'refund_debit', 'payout_debit', 'tds_debit');
   create type payout_status    as enum ('processing', 'processed', 'failed');

@@ -81,6 +81,7 @@ create index if not exists idx_modules_course on modules(course_id, position);
 create table if not exists nodes (
   id                uuid primary key default gen_random_uuid(),
   module_id         uuid not null references modules(id) on delete cascade,
+  parent_node_id    uuid references nodes(id) on delete cascade,
   type              node_type not null,
   title             text not null,
   position          integer not null,

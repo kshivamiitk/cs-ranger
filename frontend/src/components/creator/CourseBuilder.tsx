@@ -57,6 +57,7 @@ const LESSON_TYPES: { type: CourseNode["type"]; label: string; icon: React.React
   { type: "quiz", label: "Quiz", icon: <ListChecks className="h-3.5 w-3.5" /> },
   { type: "pdf", label: "PDF", icon: <FileType className="h-3.5 w-3.5" /> },
   { type: "static_website", label: "Static Site", icon: <Code2 className="h-3.5 w-3.5" /> },
+  { type: "folder", label: "Folder", icon: <Folder className="h-3.5 w-3.5" /> },
 ];
 
 function lessonIcon(t?: CourseNode["type"]) {
@@ -67,6 +68,7 @@ function nodeBody(n: DraftNode, fallbackTitle: string) {
   return {
     type: (n.type || "video") as CourseNode["type"],
     title: n.title || fallbackTitle,
+    parent_node_id: n.parent_node_id,
     duration_seconds: n.duration_seconds,
     is_free_preview: n.is_free_preview,
     video_url: n.video_url, video_provider: n.video_provider,

@@ -147,6 +147,9 @@ async function handleProgressUpdate(learnerId: string, role: string | undefined,
     if (!(await canAccessCourse(db, learnerId, role, node.course_id))) {
       return { error: { status: 403, message: "You need active access to this course to track progress", code: "NO_ACCESS" } };
     }
+    if (node.type === "folder") {
+      return { error: { status: 400, message: "Folders are not completable lessons", code: "FOLDER_NOT_LESSON" } };
+    }
     if (node.type === "quiz" && signal.markDone) {
       return { error: { status: 400, message: "Quizzes are completed by reaching the passing score, not by marking done", code: "QUIZ_PASS_REQUIRED" } };
     }
@@ -221,7 +224,7 @@ app.get("/:courseId/progress", requireAuth, async (req, res) => {
   const result = await withDb(async (db) => {
     const [{ data: enrollment }, { data: completed }] = await Promise.all([
       db.from("enrollments").select("progress_percent, completed_at, last_node_id").eq("learner_id", req.user!.id).eq("course_id", req.params.courseId).maybeSingle(),
-      db.from("node_progress").select("node_id").eq("learner_id", req.user!.id).eq("is_completed", true),
+      db.from("node_progress").select("node_id, nodes!inner(type)").eq("learner_id", req.user!.id).eq("is_completed", true).neq("nodes.type", "folder"),
     ]);
     return { enrollment, completedNodeIds: completed?.map((c) => c.node_id) || [] };
   }, () => ({ enrollment: null, completedNodeIds: [] }));

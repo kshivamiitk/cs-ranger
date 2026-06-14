@@ -351,7 +351,7 @@ app.get("/:id/detail", async (req, res) => {
     // (quiz_payload.correctIndex) out of this unauthenticated response. Full lesson content
     // is served separately to the player via GET /:id.
     const [{ data: modules }, { data: creator }, { data: reviews }] = await Promise.all([
-      db.from("modules").select("id, title, position, nodes(id, type, title, position, duration_seconds, is_free_preview)").eq("course_id", course.id).order("position"),
+      db.from("modules").select("id, title, position, nodes(id, parent_node_id, type, title, position, duration_seconds, is_free_preview)").eq("course_id", course.id).order("position"),
       db.from("profiles").select("user_id, display_name, username, bio, college, avatar_url").eq("user_id", course.creator_id).maybeSingle(),
       db.from("reviews").select("id, rating, body, created_at, learner_id").eq("course_id", course.id).order("created_at", { ascending: false }).limit(10),
     ]);
@@ -639,7 +639,8 @@ app.post("/:id/publish", requireRole("creator"), async (req, res) => {
     const { count: lessonCount } = await db
       .from("nodes")
       .select("id, modules!inner(course_id)", { count: "exact", head: true })
-      .eq("modules.course_id", req.params.id);
+      .eq("modules.course_id", req.params.id)
+      .neq("type", "folder");
     if (!lessonCount || lessonCount < 1) {
       return { invalid: "Add at least one lesson before publishing" } as const;
     }
@@ -755,7 +756,8 @@ app.delete("/modules/:id", requireRole("creator", "admin"), async (req, res) => 
 // duration_seconds / is_free_preview / video_url / pdf_url / static_website / quiz_payload).
 const NodeCreate = z.object({
   moduleId: z.string(),
-  type: z.enum(["video", "markdown", "quiz", "pdf", "static_website"]),
+  parent_node_id: z.string().uuid().nullable().optional(),
+  type: z.enum(["video", "markdown", "quiz", "pdf", "static_website", "folder"]),
   title: z.string().min(1).max(100),
   duration_seconds: z.number().int().optional(),
   is_free_preview: z.boolean().optional().default(false),
@@ -789,6 +791,12 @@ app.post("/nodes", requireRole("creator", "admin"), async (req, res) => {
     if (!courseId) return { notFound: true } as const;
     const check = await assertCanWriteCourse(db, courseId, req.user!.id, req.user!.role === "admin");
     if (!check.ok) return check;
+    if (d.parent_node_id) {
+      const { data: parent } = await db.from("nodes").select("id, module_id, type").eq("id", d.parent_node_id).maybeSingle();
+      if (!parent) return { parentNotFound: true } as const;
+      if (parent.module_id !== d.moduleId) return { parentModuleMismatch: true } as const;
+      if (parent.type !== "folder") return { parentNotFolder: true } as const;
+    }
     if (d.type === "static_website") {
       const { data: course } = await db.from("courses").select("creator_id").eq("id", courseId).maybeSingle();
       if (course?.creator_id) {
@@ -797,9 +805,11 @@ app.post("/nodes", requireRole("creator", "admin"), async (req, res) => {
         if (quotaError) return quotaError;
       }
     }
-    const { count } = await db.from("nodes").select("id", { count: "exact", head: true }).eq("module_id", d.moduleId);
+    let positionQuery = db.from("nodes").select("id", { count: "exact", head: true }).eq("module_id", d.moduleId);
+    positionQuery = d.parent_node_id ? positionQuery.eq("parent_node_id", d.parent_node_id) : positionQuery.is("parent_node_id", null);
+    const { count } = await positionQuery;
     const { data, error } = await db.from("nodes").insert({
-      module_id: d.moduleId, type: d.type, title: d.title, position: count || 0,
+      module_id: d.moduleId, parent_node_id: d.parent_node_id || null, type: d.type, title: d.title, position: count || 0,
       duration_seconds: d.duration_seconds, is_free_preview: d.is_free_preview,
       video_url: d.video_url, video_provider: d.video_provider,
       video_chapters: d.video_chapters, video_subtitles: d.video_subtitles,
@@ -811,6 +821,9 @@ app.post("/nodes", requireRole("creator", "admin"), async (req, res) => {
   }, () => ({ id: `n-${Date.now()}`, ...d }));
   if (result && "ok" in result && result.ok === false) return fail(res, result.status, result.message, result.code, result.meta);
   if (result && "notFound" in result) return fail(res, 404, "Module not found", "NOT_FOUND");
+  if (result && "parentNotFound" in result) return fail(res, 404, "Parent folder not found", "PARENT_NOT_FOUND");
+  if (result && "parentModuleMismatch" in result) return fail(res, 400, "Parent folder must be in the same module", "PARENT_MODULE_MISMATCH");
+  if (result && "parentNotFolder" in result) return fail(res, 400, "Parent node must be a folder", "PARENT_NOT_FOLDER");
   if (result && "overQuota" in result) {
     return fail(res, 402, "You're over your storage quota. Buy more storage before saving or publishing this course.", "QUOTA_EXCEEDED", result);
   }
@@ -822,8 +835,8 @@ app.patch("/nodes/:id", requireRole("creator", "admin"), async (req, res) => {
   // Lesson type is chosen at creation and locked thereafter — strip any attempt
   // to change it (or move the lesson to a different module). The UI doesn't
   // expose either, but a hand-crafted request must not be able to either.
-  const { type: _t, module_id: _m, id: _i, ...patch } = req.body || {};
-  void _t; void _m; void _i;
+  const { type: _t, module_id: _m, parent_node_id: _p, id: _i, ...patch } = req.body || {};
+  void _t; void _m; void _p; void _i;
   // Structured video extras (chapters/subtitles) must be well-formed; the rest
   // of the patch is plain column updates covered by DB constraints.
   const extras = NodeVideoExtras.safeParse(patch);

@@ -9,6 +9,7 @@ import { publish, redis, sendRealtimeNotification, Topics } from "@cs-ranger/sha
  *   video               → watchSeconds >= 80% of duration, or markDone
  *   static_website      → markDone only
  *   quiz                → passing score only (handled by the quiz attempt path)
+ *   folder              → structural only; ignored by completion
  *
  * All writes are idempotent merges: progress metadata only ever ratchets up
  * (max of old/new) and a completed node never flips back to incomplete, so
@@ -27,7 +28,7 @@ export interface ProgressSignal {
 
 export interface NodeCore {
   id: string;
-  type: "video" | "markdown" | "quiz" | "pdf" | "static_website";
+  type: "video" | "markdown" | "quiz" | "pdf" | "static_website" | "folder";
   duration_seconds: number | null;
   course_id: string;
 }
@@ -59,6 +60,7 @@ export async function getNodeCore(db: SupabaseClient, nodeId: string): Promise<N
 /** Decide whether the merged signals satisfy this node type's completion rule. */
 export function evaluateCompletion(node: NodeCore, merged: { scrollPercent: number; watchSeconds: number; durationSeconds: number | null }, markDone: boolean): { completed: boolean; rule: CompletionRule | null } {
   if (node.type === "quiz") return { completed: false, rule: null };
+  if (node.type === "folder") return { completed: false, rule: null };
   if (markDone) return { completed: true, rule: "manual" };
   if (node.type === "markdown" || node.type === "pdf") {
     if (merged.scrollPercent >= 80) return { completed: true, rule: "scroll_80" };
@@ -151,7 +153,8 @@ export async function recomputeCourseProgress(
 
   const { data: courseNodes } = await db.from("nodes")
     .select("id, modules!inner(course_id)")
-    .eq("modules.course_id", courseId);
+    .eq("modules.course_id", courseId)
+    .neq("type", "folder");
   const requiredIds = (courseNodes || []).map((n) => n.id as string);
   if (requiredIds.length === 0) {
     return { courseProgressPercent: enrollment.progress_percent || 0, courseCompleted: !!enrollment.completed_at, courseJustCompleted: false };

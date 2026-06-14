@@ -8,7 +8,7 @@ import { useApp } from "@/app/providers";
 import {
   ArrowLeft, ArrowRight, Award, Bookmark, BookmarkCheck, CheckCircle2, ChevronDown, ChevronRight,
   ExternalLink, FileText, ListChecks, Maximize2, MessageSquare, Minimize2, Paperclip, Play, Sparkles, Loader2,
-  StickyNote, Timer, X,
+  StickyNote, Timer, X, Folder,
 } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Avatar } from "@/components/common/Avatar";
@@ -21,10 +21,11 @@ import { QuizPanel } from "./QuizPanel";
 import { NotesTab } from "./NotesTab";
 import { CourseCompletionModal } from "./CourseCompletionModal";
 import { api, type Course, type CourseNode, type Comment, type LessonBookmark, type NodeProgressResult } from "@/lib/api";
+import { buildNodeTree, flattenCourseNodes, nodeTreeContains } from "@/lib/courseTree";
 import { cn, durationFromSeconds, relativeTime, avatarUrl } from "@/lib/utils";
 
 export function Player({ course, initialNodeId }: { course: Course; initialNodeId: string }) {
-  const allNodes = useMemo(() => (course.modules || []).flatMap((m) => m.nodes || []), [course]);
+  const allNodes = useMemo(() => flattenCourseNodes(course), [course]);
   const [activeId, setActiveId] = useState(initialNodeId);
   const [tab, setTab] = useState<"qa" | "notes" | "resources">("qa");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -67,6 +68,7 @@ export function Player({ course, initialNodeId }: { course: Course; initialNodeI
 
   const { data: progress } = useQuery({ queryKey: ["course-progress", course.id], queryFn: () => api.enrollments.courseProgress(course.id) });
   const completedSet = useMemo(() => new Set(progress?.completedNodeIds || []), [progress]);
+  const completedLessonCount = useMemo(() => allNodes.filter((n) => completedSet.has(n.id)).length, [allNodes, completedSet]);
 
   // ── Completion engine ──
   const [autoAdvanceUntil, setAutoAdvanceUntil] = useState<number | null>(null);
@@ -119,7 +121,7 @@ export function Player({ course, initialNodeId }: { course: Course; initialNodeI
     onError: (e) => setProgressError(e instanceof Error ? e.message : "Could not update progress"),
   });
 
-  const progressPct = Math.round((completedSet.size / Math.max(1, allNodes.length)) * 100);
+  const progressPct = Math.round((completedLessonCount / Math.max(1, allNodes.length)) * 100);
   const certificateMinProgress = course.certificate_min_progress ?? 100;
   const certificateReady = (course.certificate_enabled ?? true) && progressPct >= certificateMinProgress;
 
@@ -244,7 +246,7 @@ export function Player({ course, initialNodeId }: { course: Course; initialNodeI
                 <h2 className="mt-2 font-display text-base font-semibold leading-tight">{course.title}</h2>
                 <div className="mt-2">
                   <Progress value={progressPct} />
-                  <p className="mt-1 text-xs text-fg-dim">{progressPct}% · {completedSet.size}/{allNodes.length} lessons</p>
+                  <p className="mt-1 text-xs text-fg-dim">{progressPct}% · {completedLessonCount}/{allNodes.length} lessons</p>
                   {certificateReady && progressPct < 100 && (
                     <button onClick={() => setShowCompletion(true)} className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
                       <Award className="h-3.5 w-3.5" /> Claim certificate
@@ -254,18 +256,13 @@ export function Player({ course, initialNodeId }: { course: Course; initialNodeI
 
                 <div className="mt-5 space-y-1">
                   {(course.modules || []).map((m) => (
-                    <ModuleAccordion key={m.id} title={m.title} open={(m.nodes || []).some((n) => n.id === activeId)}>
-                      {(m.nodes || []).map((n) => (
-                        <button key={n.id} onClick={() => setActiveId(n.id)}
-                          className={cn(
-                            "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition",
-                            activeId === n.id ? "bg-surface-2 text-fg shadow-glass" : "text-fg-dim hover:bg-surface-2 hover:text-fg",
-                          )}>
-                          {completedSet.has(n.id) ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" /> : <NodeIcon type={n.type} />}
-                          <span className="flex-1 truncate">{n.title}</span>
-                          <span className="text-[10px] text-fg-dim">{durationFromSeconds(n.duration_seconds || 0)}</span>
-                        </button>
-                      ))}
+                    <ModuleAccordion key={m.id} title={m.title} open={nodeTreeContains(m.nodes || [], activeId)}>
+                      <CurriculumNodes
+                        nodes={buildNodeTree(m.nodes || [])}
+                        activeId={activeId}
+                        completedSet={completedSet}
+                        onSelect={setActiveId}
+                      />
                     </ModuleAccordion>
                   ))}
                 </div>
@@ -512,6 +509,70 @@ function ModuleAccordion({ title, children, open: defaultOpen }: { title: string
   );
 }
 
+function CurriculumNodes({
+  nodes, activeId, completedSet, onSelect, depth = 0,
+}: {
+  nodes: CourseNode[];
+  activeId: string;
+  completedSet: Set<string>;
+  onSelect: (id: string) => void;
+  depth?: number;
+}) {
+  return (
+    <div className="space-y-0.5">
+      {nodes.map((node) => (
+        node.type === "folder" ? (
+          <FolderRow key={node.id} node={node} activeId={activeId} completedSet={completedSet} onSelect={onSelect} depth={depth} />
+        ) : (
+          <button key={node.id} onClick={() => onSelect(node.id)}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition",
+              activeId === node.id ? "bg-surface-2 text-fg shadow-glass" : "text-fg-dim hover:bg-surface-2 hover:text-fg",
+            )}
+            style={{ paddingLeft: 8 + depth * 12 }}
+          >
+            {completedSet.has(node.id) ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" /> : <NodeIcon type={node.type} />}
+            <span className="flex-1 truncate">{node.title}</span>
+            <span className="text-[10px] text-fg-dim">{durationFromSeconds(node.duration_seconds || 0)}</span>
+          </button>
+        )
+      ))}
+    </div>
+  );
+}
+
+function FolderRow({
+  node, activeId, completedSet, onSelect, depth,
+}: {
+  node: CourseNode;
+  activeId: string;
+  completedSet: Set<string>;
+  onSelect: (id: string) => void;
+  depth: number;
+}) {
+  const [open, setOpen] = useState(nodeTreeContains(node.children || [], activeId));
+  useEffect(() => {
+    if (nodeTreeContains(node.children || [], activeId)) setOpen(true);
+  }, [activeId, node.children]);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wider text-fg-dim transition hover:bg-surface-2 hover:text-fg"
+        style={{ paddingLeft: 8 + depth * 12 }}
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <Folder className="h-3.5 w-3.5" />
+        <span className="min-w-0 flex-1 truncate">{node.title}</span>
+      </button>
+      {open && node.children?.length ? (
+        <CurriculumNodes nodes={node.children} activeId={activeId} completedSet={completedSet} onSelect={onSelect} depth={depth + 1} />
+      ) : null}
+    </div>
+  );
+}
+
 function NodeIcon({ type }: { type: CourseNode["type"] }) {
   const map: Record<string, React.ReactNode> = {
     video: <Play className="h-3.5 w-3.5" />,
@@ -519,6 +580,7 @@ function NodeIcon({ type }: { type: CourseNode["type"] }) {
     quiz: <ListChecks className="h-3.5 w-3.5" />,
     pdf: <FileText className="h-3.5 w-3.5" />,
     static_website: <FileText className="h-3.5 w-3.5" />,
+    folder: <Folder className="h-3.5 w-3.5" />,
   };
   return <span className="shrink-0">{map[type]}</span>;
 }

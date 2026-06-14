@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byPosition, sortCourseTree } from "../course-service/src/ordering";
+import { byPosition, sortCourseTree, sortNodesPreorder } from "../course-service/src/ordering";
 
 // ============================================================
 // Guards the "modules/lessons come back in random order" bug. The DB has an
@@ -46,5 +46,22 @@ describe("sortCourseTree", () => {
   it("is a stable order for equal positions (keeps incoming order)", () => {
     const modules = [{ id: "a", position: 0 }, { id: "b", position: 0 }, { id: "c", position: 0 }];
     expect(sortCourseTree(modules).map((m) => m.id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("sortNodesPreorder", () => {
+  it("orders nested folders in preorder by sibling position", () => {
+    const nodes = [
+      { id: "lesson-b", parent_node_id: "folder-a", position: 1 },
+      { id: "root-lesson", parent_node_id: null, position: 1 },
+      { id: "folder-a", parent_node_id: null, position: 0 },
+      { id: "lesson-a", parent_node_id: "folder-a", position: 0 },
+    ];
+    expect(sortNodesPreorder(nodes).map((n) => n.id)).toEqual(["folder-a", "lesson-a", "lesson-b", "root-lesson"]);
+  });
+
+  it("treats missing parents as roots instead of dropping nodes", () => {
+    const nodes = [{ id: "orphan", parent_node_id: "missing", position: 0 }];
+    expect(sortNodesPreorder(nodes).map((n) => n.id)).toEqual(["orphan"]);
   });
 });

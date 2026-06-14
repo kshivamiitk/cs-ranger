@@ -51,4 +51,8 @@ describe("evaluateCompletion (per-node-type completion policy)", () => {
   it("quizzes never complete through the generic progress path, even with markDone", () => {
     expect(evaluateCompletion(node("quiz"), { scrollPercent: 100, watchSeconds: 100, durationSeconds: 100 }, true).completed).toBe(false);
   });
+
+  it("folders are structural and never complete", () => {
+    expect(evaluateCompletion(node("folder"), { scrollPercent: 100, watchSeconds: 100, durationSeconds: 100 }, true).completed).toBe(false);
+  });
 });
