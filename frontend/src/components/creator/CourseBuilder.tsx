@@ -35,6 +35,9 @@ interface DraftCourse {
   thumbnail_url?: string; promo_video_url?: string;
   price: number; discounted_price?: number;
   certificate_enabled: boolean;
+  certificate_min_progress: number;
+  certificate_require_quiz_pass: boolean;
+  certificate_template: { heading?: string; body?: string; accentColor?: string; footerNote?: string };
 }
 interface DraftNode extends Partial<CourseNode> { _local?: boolean; _localId: string }
 interface DraftModule { id?: string; _localId: string; title: string; nodes: DraftNode[] }
@@ -91,6 +94,9 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
   const [course, setCourse] = useState<DraftCourse>({
     title: "", subtitle: "", description: "", level: "All Levels",
     language: "English", tags: [], price: 0, certificate_enabled: true,
+    certificate_min_progress: 100,
+    certificate_require_quiz_pass: false,
+    certificate_template: {},
   });
   const [modules, setModules] = useState<DraftModule[]>([]);
   const [selected, setSelected] = useState<Selection>({ kind: "course" });
@@ -148,6 +154,9 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
       category_id: existing.category_id || undefined, level: existing.level || "All Levels", language: existing.language || "English",
       tags: existing.tags || [], thumbnail_url: existing.thumbnail_url || undefined, promo_video_url: existing.promo_video_url || undefined,
       price: existing.price || 0, discounted_price: existing.discounted_price || undefined, certificate_enabled: existing.certificate_enabled ?? true,
+      certificate_min_progress: existing.certificate_min_progress ?? 100,
+      certificate_require_quiz_pass: existing.certificate_require_quiz_pass ?? false,
+      certificate_template: existing.certificate_template || {},
     });
     setStatus((existing.status as typeof status) || "draft");
     const loaded: DraftModule[] = (existing.modules || []).map((m) => ({
@@ -392,6 +401,9 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
       category_id: course.category_id, level: course.level, language: course.language, tags: course.tags,
       thumbnail_url: course.thumbnail_url, promo_video_url: course.promo_video_url,
       price: course.price, discounted_price: course.discounted_price, certificate_enabled: course.certificate_enabled,
+      certificate_min_progress: course.certificate_min_progress,
+      certificate_require_quiz_pass: course.certificate_require_quiz_pass,
+      certificate_template: course.certificate_template,
     };
     let cid = course.id;
     if (!cid) { const created = await api.courses.create(basics); cid = created.id; }
@@ -796,6 +808,10 @@ function CoursePanel({
   courseId?: string;
   canEdit?: boolean;
 }) {
+  const setCertificateTemplate = (patch: DraftCourse["certificate_template"]) => {
+    setCourse((c) => ({ ...c, certificate_template: { ...c.certificate_template, ...patch } }));
+  };
+
   return (
     <div className="space-y-4">
       <Section title="Basics">
@@ -880,6 +896,68 @@ function CoursePanel({
           <input type="checkbox" checked={course.certificate_enabled} onChange={(e) => setCourse({ ...course, certificate_enabled: e.target.checked })} className="accent-[color:var(--brand-primary)]" />
           Issue certificate on completion
         </label>
+        {course.certificate_enabled && (
+          <div className="mt-4 space-y-4 rounded-xl border border-border bg-surface-2/50 p-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Minimum progress for certificate" hint="100% means only fully completed learners can claim it.">
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={course.certificate_min_progress}
+                  onChange={(e) => setCourse({ ...course, certificate_min_progress: Math.max(1, Math.min(100, Number(e.target.value) || 100)) })}
+                  className="input"
+                />
+              </Field>
+              <label className="mt-6 flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={course.certificate_require_quiz_pass}
+                  onChange={(e) => setCourse({ ...course, certificate_require_quiz_pass: e.target.checked })}
+                  className="accent-[color:var(--brand-primary)]"
+                />
+                Require all quiz lessons to be passed
+              </label>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Certificate heading">
+                <input
+                  maxLength={80}
+                  value={course.certificate_template.heading || ""}
+                  onChange={(e) => setCertificateTemplate({ heading: e.target.value || undefined })}
+                  className="input"
+                  placeholder="CERTIFICATE OF COMPLETION"
+                />
+              </Field>
+              <Field label="Accent color">
+                <input
+                  type="color"
+                  value={course.certificate_template.accentColor || "#7c3aed"}
+                  onChange={(e) => setCertificateTemplate({ accentColor: e.target.value })}
+                  className="h-11 w-20 rounded-xl border border-border bg-surface p-1"
+                />
+              </Field>
+            </div>
+            <Field label="Certificate body sentence">
+              <input
+                maxLength={120}
+                value={course.certificate_template.body || ""}
+                onChange={(e) => setCertificateTemplate({ body: e.target.value || undefined })}
+                className="input"
+                placeholder="has successfully completed the course"
+              />
+            </Field>
+            <Field label="Footer note">
+              <input
+                maxLength={120}
+                value={course.certificate_template.footerNote || ""}
+                onChange={(e) => setCertificateTemplate({ footerNote: e.target.value || undefined })}
+                className="input"
+                placeholder="LearnRift - learn. build. ship."
+              />
+            </Field>
+          </div>
+        )}
       </Section>
     </div>
   );

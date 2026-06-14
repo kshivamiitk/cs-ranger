@@ -578,6 +578,7 @@ export const api = {
     dismissReport: (id: string) => unwrap<{ dismissed: boolean }>(axiosClient().post(`/courses/admin/reports/${id}/dismiss`, {})),
     reviewReport: (id: string) => unwrap<{ reviewed: boolean }>(axiosClient().post(`/courses/admin/reports/${id}/reviewed`, {})),
     suspendReportedCourse: (id: string) => unwrap<{ suspended: boolean; courseId: string }>(axiosClient().post(`/courses/admin/reports/${id}/suspend-course`, {})),
+    storageOverview: () => unwrap<AdminStorageOverview>(axiosClient().get("/courses/storage/admin/overview")),
   },
 };
 
@@ -610,12 +611,15 @@ export interface Course {
   price?: number;
   discounted_price?: number;
   certificate_enabled?: boolean;
+  certificate_min_progress?: number;
+  certificate_require_quiz_pass?: boolean;
+  certificate_template?: CertificateTemplate;
   enrollment_count?: number;
   rating_avg?: number;
   rating_count?: number;
   duration_seconds?: number;
   modules?: Module[];
-  profiles?: { display_name: string; avatar_url?: string };
+  profiles?: { display_name: string; username?: string; avatar_url?: string };
   published_at?: string;
   created_at?: string;
   updated_at?: string;
@@ -664,9 +668,31 @@ export interface Collaborator { course_id: string; user_id: string; status: "pen
 export interface CollaborationListItem { course_id: string; user_id: string; status: "pending" | "accepted" | "declined"; role: "editor"; invited_by: string; invited_at: string; responded_at?: string | null; courses?: { id: string; title: string; thumbnail_url?: string | null; creator_id: string } | null; inviter?: { display_name?: string } | null }
 export interface LockState { heldBy: string; expiresAt: string; holderName: string; expired: boolean }
 export interface StorageUsage { bytesUsed: number; quotaBytes: number; remainingBytes: number; freeMb: number; extraBytes: number; extraUntil: string | null; pricing: { pricePerMbInr: number; durationDays: number } }
+export interface StorageBucketUsage { bucket: string; bytes: number; objects: number }
+export interface AdminStorageOverview {
+  databaseBytes: number;
+  supabaseStorageBytes: number;
+  supabaseStorageObjects: number;
+  supabaseStorageByBucket: StorageBucketUsage[];
+  trackedUploadBytes: number;
+  trackedUploadObjects: number;
+  trackedUploadByBucket: StorageBucketUsage[];
+  creatorStorageBytes: number;
+  staticWebsiteBytes: number;
+  pendingUploadBytes: number;
+  activePurchasedBytes: number;
+  generatedAt: string;
+}
 export interface UserTransaction { id: string; kind: "course" | "storage"; amount_paise: number; currency: string; status: string; description: string; reference_id: string | null; razorpay_order_id?: string | null; razorpay_payment_id?: string | null; created_at: string }
 export interface SupportTicket { id: string; user_id: string; subject: string; status: "open" | "in_progress" | "resolved"; created_at: string; updated_at: string; messages?: { id: string; body: string; author_id: string; created_at: string; is_internal_note?: boolean }[] }
 export interface Category { id: string; name: string; slug: string; icon?: string; position?: number }
+
+export interface CertificateTemplate {
+  heading?: string;
+  body?: string;
+  accentColor?: string;
+  footerNote?: string;
+}
 
 // ─── Content moderation ──────────────────────────────────────────
 export interface ContentReport {

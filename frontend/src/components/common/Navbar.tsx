@@ -41,6 +41,7 @@ const ADMIN_LINKS = [
   { href: "/admin/support", label: "Support" },
   { href: "/admin/users", label: "Users" },
   { href: "/admin/courses", label: "Courses" },
+  { href: "/admin/storage", label: "Storage" },
   { href: "/admin/flagged", label: "Flagged" },
   { href: "/admin/categories", label: "Categories" },
   { href: "/admin/settings", label: "Settings" },

@@ -12,11 +12,12 @@ import { saveBlob } from "@/lib/utils";
  * certificate (idempotent — re-claiming returns the same certificate).
  */
 export function CourseCompletionModal({
-  courseId, courseTitle, certificateEnabled, onClose,
+  courseId, courseTitle, certificateEnabled, completed = true, onClose,
 }: {
   courseId: string;
   courseTitle: string;
   certificateEnabled: boolean;
+  completed?: boolean;
   onClose: () => void;
 }) {
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -38,7 +39,7 @@ export function CourseCompletionModal({
       <div className="relative w-full max-w-md overflow-hidden rounded-2xl glass-strong" onClick={(e) => e.stopPropagation()}>
         <div className="bg-mesh-1 p-8 text-center text-white">
           <PartyPopper className="mx-auto h-12 w-12" />
-          <h3 className="mt-3 font-display text-2xl font-bold">Course completed!</h3>
+          <h3 className="mt-3 font-display text-2xl font-bold">{completed ? "Course completed!" : "Certificate ready"}</h3>
           <p className="mt-1 text-sm text-white/85">{courseTitle}</p>
         </div>
         <div className="p-6">
@@ -50,7 +51,11 @@ export function CourseCompletionModal({
             <div className="space-y-3">
               {!claim.data ? (
                 <>
-                  <p className="text-sm text-fg-dim">You&apos;ve earned a completion certificate. Claim it to add it to your achievements and download the PDF.</p>
+                  <p className="text-sm text-fg-dim">
+                    {completed
+                      ? "You've earned a completion certificate. Claim it to add it to your achievements and download the PDF."
+                      : "You've met this course's certificate requirements. Claim it to add it to your achievements and download the PDF."}
+                  </p>
                   {claim.isError && <p className="text-xs text-danger">{claim.error instanceof Error ? claim.error.message : "Could not issue the certificate"}</p>}
                   <button onClick={() => claim.mutate()} disabled={claim.isPending} className="btn-primary w-full disabled:opacity-50">
                     {claim.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Award className="h-4 w-4" /> Claim certificate</>}

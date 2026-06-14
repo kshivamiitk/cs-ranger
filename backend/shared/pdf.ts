@@ -13,6 +13,12 @@ const CYAN = rgb(6 / 255, 182 / 255, 212 / 255);
 const INK = rgb(0.09, 0.1, 0.15);
 const DIM = rgb(0.42, 0.45, 0.52);
 
+function hexToRgb(hex: string | undefined, fallback = VIOLET) {
+  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return fallback;
+  const n = Number.parseInt(hex.slice(1), 16);
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+}
+
 export function formatRupees(paise: number): string {
   const sign = paise < 0 ? "-" : "";
   return `${sign}Rs ${Math.abs(paise / 100).toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
@@ -33,6 +39,10 @@ export interface CertificatePdfOptions {
   completedAt: string;          // ISO date
   certificateId: string;
   verifyUrl: string;
+  heading?: string;
+  body?: string;
+  accentColor?: string;
+  footerNote?: string;
 }
 
 export async function buildCertificatePdf(o: CertificatePdfOptions): Promise<Uint8Array> {
@@ -44,22 +54,23 @@ export async function buildCertificatePdf(o: CertificatePdfOptions): Promise<Uin
     doc.embedFont(StandardFonts.HelveticaBold),
     doc.embedFont(StandardFonts.HelveticaOblique),
   ]);
+  const accent = hexToRgb(o.accentColor);
 
   // Frame
-  page.drawRectangle({ x: 24, y: 24, width: 842 - 48, height: 595 - 48, borderColor: VIOLET, borderWidth: 2 });
+  page.drawRectangle({ x: 24, y: 24, width: 842 - 48, height: 595 - 48, borderColor: accent, borderWidth: 2 });
   page.drawRectangle({ x: 32, y: 32, width: 842 - 64, height: 595 - 64, borderColor: CYAN, borderWidth: 0.8 });
 
-  drawCentered(page, o.siteName.toUpperCase(), 520, bold, 22, VIOLET);
-  drawCentered(page, "CERTIFICATE OF COMPLETION", 478, bold, 30, INK);
+  drawCentered(page, o.siteName.toUpperCase(), 520, bold, 22, accent);
+  drawCentered(page, o.heading || "CERTIFICATE OF COMPLETION", 478, bold, 30, INK);
   drawCentered(page, "This is to certify that", 430, regular, 14, DIM);
 
   const nameSize = o.learnerName.length > 28 ? 28 : 36;
   drawCentered(page, o.learnerName, 386, bold, nameSize, INK);
   page.drawLine({ start: { x: 240, y: 374 }, end: { x: 602, y: 374 }, thickness: 1, color: CYAN });
 
-  drawCentered(page, "has successfully completed the course", 340, regular, 14, DIM);
+  drawCentered(page, o.body || "has successfully completed the course", 340, regular, 14, DIM);
   const titleSize = o.courseTitle.length > 50 ? 16 : 22;
-  drawCentered(page, o.courseTitle, 306, bold, titleSize, VIOLET);
+  drawCentered(page, o.courseTitle, 306, bold, titleSize, accent);
   drawCentered(page, `created by ${o.creatorName}`, 278, italic, 13, DIM);
 
   const completedDate = new Date(o.completedAt).toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
@@ -67,7 +78,7 @@ export async function buildCertificatePdf(o: CertificatePdfOptions): Promise<Uin
 
   drawCentered(page, `Certificate ID: ${o.certificateId}`, 120, regular, 10, DIM);
   drawCentered(page, `Verify at ${o.verifyUrl}`, 104, regular, 10, DIM);
-  drawCentered(page, `${o.siteName} — learn. build. ship.`, 64, italic, 10, DIM);
+  drawCentered(page, o.footerNote || `${o.siteName} — learn. build. ship.`, 64, italic, 10, DIM);
 
   return doc.save();
 }

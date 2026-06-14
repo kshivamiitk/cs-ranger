@@ -7,6 +7,26 @@ const PORT = Number(process.env.PORT_SEARCH || 4005);
 const CATALOG_COLS =
   "id, title, subtitle, thumbnail_url, price, discounted_price, rating_avg, rating_count, enrollment_count, category_id, language, level, creator_id, duration_seconds";
 
+type CatalogCourseRow = {
+  creator_id?: string | null;
+  profiles?: { display_name?: string | null; username?: string | null; avatar_url?: string | null } | null;
+};
+
+async function attachCreatorProfiles(db: import("@supabase/supabase-js").SupabaseClient, rows: unknown[]): Promise<unknown[]> {
+  const items = rows as CatalogCourseRow[];
+  const creatorIds = Array.from(new Set(items.map((r) => r.creator_id).filter((id): id is string => !!id)));
+  if (creatorIds.length === 0) return rows;
+  const { data: profiles } = await db.from("profiles")
+    .select("user_id, display_name, username, avatar_url")
+    .in("user_id", creatorIds);
+  const byUser = new Map((profiles || []).map((p) => [p.user_id, {
+    display_name: p.display_name,
+    username: p.username,
+    avatar_url: p.avatar_url,
+  }]));
+  return items.map((row) => ({ ...row, profiles: row.creator_id ? byUser.get(row.creator_id) || null : null }));
+}
+
 // Tier-2 scale moves on top of Tier 1:
 //  * For non-text queries we read the `popular_courses` materialized view
 //    instead of the live `courses` table. The view has a precomputed
@@ -90,7 +110,7 @@ app.get("/courses", async (req, res) => {
     query = query.order("id", { ascending: false }); // stable tiebreaker
     query = query.range(offset, offset + limit - 1);
     const { data, count } = await query;
-    const items = data || [];
+    const items = await attachCreatorProfiles(db, data || []);
     const total = count || 0;
     return { items, total, hasMore: offset + items.length < total };
   }, () => {

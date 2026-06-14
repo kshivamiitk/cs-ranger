@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "@/app/providers";
 import {
-  ArrowLeft, ArrowRight, Bookmark, BookmarkCheck, CheckCircle2, ChevronDown, ChevronRight,
+  ArrowLeft, ArrowRight, Award, Bookmark, BookmarkCheck, CheckCircle2, ChevronDown, ChevronRight,
   ExternalLink, FileText, ListChecks, Maximize2, MessageSquare, Minimize2, Paperclip, Play, Sparkles, Loader2,
   StickyNote, Timer, X,
 } from "lucide-react";
@@ -108,6 +108,8 @@ export function Player({ course, initialNodeId }: { course: Course; initialNodeI
   });
 
   const progressPct = Math.round((completedSet.size / Math.max(1, allNodes.length)) * 100);
+  const certificateMinProgress = course.certificate_min_progress ?? 100;
+  const certificateReady = (course.certificate_enabled ?? true) && progressPct >= certificateMinProgress;
 
   function advance() {
     if (node && node.type !== "quiz" && !completedSet.has(activeId)) markDone.mutate(activeId);
@@ -231,6 +233,11 @@ export function Player({ course, initialNodeId }: { course: Course; initialNodeI
                 <div className="mt-2">
                   <Progress value={progressPct} />
                   <p className="mt-1 text-xs text-fg-dim">{progressPct}% · {completedSet.size}/{allNodes.length} lessons</p>
+                  {certificateReady && progressPct < 100 && (
+                    <button onClick={() => setShowCompletion(true)} className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
+                      <Award className="h-3.5 w-3.5" /> Claim certificate
+                    </button>
+                  )}
                 </div>
 
                 <div className="mt-5 space-y-1">
@@ -393,6 +400,7 @@ export function Player({ course, initialNodeId }: { course: Course; initialNodeI
           courseId={course.id}
           courseTitle={course.title}
           certificateEnabled={course.certificate_enabled ?? true}
+          completed={progressPct >= 100}
           onClose={() => setShowCompletion(false)}
         />
       )}

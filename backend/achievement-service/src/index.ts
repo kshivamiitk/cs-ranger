@@ -7,6 +7,83 @@ const { app, listen, log } = createService("achievement-service");
 const PORT = Number(process.env.PORT_ACHIEVEMENT || 4011);
 const APP_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
 
+type CertificateTemplate = {
+  heading?: string;
+  body?: string;
+  accentColor?: string;
+  footerNote?: string;
+};
+
+type CertificateCourseSettings = {
+  title?: string;
+  creator_id?: string;
+  certificate_enabled?: boolean;
+  certificate_min_progress?: number | null;
+  certificate_require_quiz_pass?: boolean | null;
+  certificate_template?: CertificateTemplate | null;
+};
+
+type CertificateEligibility =
+  | { ok: true; course: CertificateCourseSettings }
+  | { ok: false; status: number; message: string; code: string };
+
+async function evaluateCertificateEligibility(db: SupabaseClient, learnerId: string, courseId: string): Promise<CertificateEligibility> {
+  const [{ data: enrollment }, { data: course }] = await Promise.all([
+    db.from("enrollments").select("completed_at, progress_percent").eq("learner_id", learnerId).eq("course_id", courseId).maybeSingle(),
+    db.from("courses")
+      .select("title, creator_id, certificate_enabled, certificate_min_progress, certificate_require_quiz_pass, certificate_template")
+      .eq("id", courseId)
+      .maybeSingle(),
+  ]);
+  if (!course) return { ok: false, status: 404, message: "Course not found", code: "NOT_FOUND" };
+  const c = course as CertificateCourseSettings;
+  if (!c.certificate_enabled) return { ok: false, status: 400, message: "This course does not issue certificates", code: "CERTIFICATE_DISABLED" };
+  const minProgress = c.certificate_min_progress ?? 100;
+  const progress = Number(enrollment?.progress_percent ?? 0);
+  if (!enrollment || progress < minProgress) {
+    return { ok: false, status: 400, message: `Reach ${minProgress}% course progress before claiming a certificate`, code: "CERTIFICATE_PROGRESS_REQUIRED" };
+  }
+  if (minProgress >= 100 && !enrollment.completed_at) {
+    return { ok: false, status: 400, message: "Complete the course before claiming a certificate", code: "NOT_COMPLETED" };
+  }
+  if (c.certificate_require_quiz_pass) {
+    const { data: quizzes } = await db.from("nodes")
+      .select("id, modules!inner(course_id)")
+      .eq("type", "quiz")
+      .eq("modules.course_id", courseId);
+    const quizIds = (quizzes || []).map((q) => q.id).filter(Boolean);
+    if (quizIds.length > 0) {
+      const { data: passed } = await db.from("quiz_attempts")
+        .select("node_id")
+        .eq("learner_id", learnerId)
+        .eq("passed", true)
+        .in("node_id", quizIds);
+      const passedIds = new Set((passed || []).map((p) => p.node_id));
+      if (quizIds.some((id) => !passedIds.has(id))) {
+        return { ok: false, status: 400, message: "Pass every quiz lesson before claiming a certificate", code: "QUIZ_PASS_REQUIRED" };
+      }
+    }
+  }
+  return { ok: true, course: c };
+}
+
+async function issueCertificate(db: SupabaseClient, learnerId: string, courseId: string) {
+  const { data: existing } = await db.from("certificates").select("*").eq("learner_id", learnerId).eq("course_id", courseId).maybeSingle();
+  if (existing) return { certificate: existing, alreadyIssued: true };
+  const token = randomBytes(8).toString("hex");
+  const { data: inserted, error } = await db.from("certificates")
+    .insert({ learner_id: learnerId, course_id: courseId, verification_token: token })
+    .select("*").maybeSingle();
+  if (error || !inserted) {
+    const { data: raced } = await db.from("certificates").select("*").eq("learner_id", learnerId).eq("course_id", courseId).maybeSingle();
+    if (raced) return { certificate: raced, alreadyIssued: true };
+    throw error || new Error("Certificate insert failed");
+  }
+  const detail = await loadCertificateDetail(db, inserted.id as string);
+  if (detail) await storeCertificatePdf(db, detail);
+  return { certificate: inserted, alreadyIssued: false };
+}
+
 // ─── Streak + badge evaluation on node completion ─────────────────
 consume<{ learnerId: string; nodeId: string }>(Topics.NODE_COMPLETED, async ({ learnerId }) => {
   await withDb(async (db) => {
@@ -44,12 +121,11 @@ async function awardBadge(db: SupabaseClient, userId: string, ruleKey: string) {
 // ─── Certificate on enrollment.completed ─────────────────────────
 consume<{ learnerId: string; courseId: string }>(Topics.ENROLLMENT_COMPLETED, async ({ learnerId, courseId }) => {
   await withDb(async (db) => {
-    const { data: course } = await db.from("courses").select("certificate_enabled").eq("id", courseId).maybeSingle();
-    if (!course?.certificate_enabled) return null;
-    const token = randomBytes(8).toString("hex");
-    const { data: cert } = await db.from("certificates").insert({ learner_id: learnerId, course_id: courseId, verification_token: token }).select("*").maybeSingle();
-    if (cert) {
-      await publish(Topics.ACHIEVEMENT_CERTIFICATE_ISSUED, { learnerId, courseId, certificateId: cert.id });
+    const eligibility = await evaluateCertificateEligibility(db, learnerId, courseId);
+    if (!eligibility.ok) return null;
+    const issued = await issueCertificate(db, learnerId, courseId);
+    if (!issued.alreadyIssued) {
+      await publish(Topics.ACHIEVEMENT_CERTIFICATE_ISSUED, { learnerId, courseId, certificateId: issued.certificate.id });
       await awardBadge(db, learnerId, "first_course");
     }
     return null;
@@ -150,14 +226,15 @@ interface CertificateDetail {
   id: string; learner_id: string; course_id: string; pdf_url: string | null;
   verification_token: string; issued_at: string;
   courseTitle: string; creatorName: string; learnerName: string;
+  template: CertificateTemplate;
 }
 
 async function loadCertificateDetail(db: SupabaseClient, certId: string): Promise<CertificateDetail | null> {
   const { data: cert } = await db.from("certificates")
-    .select("*, courses(title, creator_id), profiles!certificates_learner_id_fkey(display_name)")
+    .select("*, courses(title, creator_id, certificate_template), profiles!certificates_learner_id_fkey(display_name)")
     .eq("id", certId).maybeSingle();
   if (!cert) return null;
-  type Row = { id: string; learner_id: string; course_id: string; pdf_url: string | null; verification_token: string; issued_at: string; courses?: { title?: string; creator_id?: string } | null; profiles?: { display_name?: string } | null };
+  type Row = { id: string; learner_id: string; course_id: string; pdf_url: string | null; verification_token: string; issued_at: string; courses?: { title?: string; creator_id?: string; certificate_template?: CertificateTemplate | null } | null; profiles?: { display_name?: string } | null };
   const r = cert as Row;
   let creatorName = "LearnRift Creator";
   if (r.courses?.creator_id) {
@@ -168,6 +245,7 @@ async function loadCertificateDetail(db: SupabaseClient, certId: string): Promis
     id: r.id, learner_id: r.learner_id, course_id: r.course_id, pdf_url: r.pdf_url,
     verification_token: r.verification_token, issued_at: r.issued_at,
     courseTitle: r.courses?.title || "Course", creatorName, learnerName: r.profiles?.display_name || "Learner",
+    template: r.courses?.certificate_template || {},
   };
 }
 
@@ -181,6 +259,10 @@ async function renderCertificatePdf(detail: CertificateDetail): Promise<Uint8Arr
     completedAt: detail.issued_at,
     certificateId: detail.id,
     verifyUrl: `${APP_URL}/verify/${detail.verification_token}`,
+    heading: detail.template.heading,
+    body: detail.template.body,
+    accentColor: detail.template.accentColor,
+    footerNote: detail.template.footerNote,
   });
 }
 
@@ -213,40 +295,21 @@ app.post("/certificates/claim", requireAuth, async (req, res) => {
     | { error: { status: number; message: string; code: string } }
     | { certificate: Record<string, unknown>; alreadyIssued: boolean }
   >(async (db) => {
-    const [{ data: enrollment }, { data: course }] = await Promise.all([
-      db.from("enrollments").select("completed_at, progress_percent").eq("learner_id", learnerId).eq("course_id", courseId).maybeSingle(),
-      db.from("courses").select("title, certificate_enabled").eq("id", courseId).maybeSingle(),
-    ]);
-    if (!course) return { error: { status: 404, message: "Course not found", code: "NOT_FOUND" } };
-    if (!course.certificate_enabled) return { error: { status: 400, message: "This course does not issue certificates", code: "CERTIFICATE_DISABLED" } };
-    if (!enrollment?.completed_at) return { error: { status: 400, message: "Complete the course before claiming a certificate", code: "NOT_COMPLETED" } };
-
-    const { data: existing } = await db.from("certificates").select("*").eq("learner_id", learnerId).eq("course_id", courseId).maybeSingle();
-    if (existing) return { certificate: existing, alreadyIssued: true };
-
-    const token = randomBytes(8).toString("hex");
-    const { data: inserted, error } = await db.from("certificates")
-      .insert({ learner_id: learnerId, course_id: courseId, verification_token: token })
-      .select("*").maybeSingle();
-    if (error || !inserted) {
-      // Lost a race with the event consumer — fetch whichever row won.
-      const { data: raced } = await db.from("certificates").select("*").eq("learner_id", learnerId).eq("course_id", courseId).maybeSingle();
-      if (raced) return { certificate: raced, alreadyIssued: true };
-      throw error || new Error("Certificate insert failed");
+    const eligibility = await evaluateCertificateEligibility(db, learnerId, courseId);
+    if (!eligibility.ok) return { error: { status: eligibility.status, message: eligibility.message, code: eligibility.code } };
+    const issued = await issueCertificate(db, learnerId, courseId);
+    if (!issued.alreadyIssued) {
+      await awardBadge(db, learnerId, "first_course");
+      await db.from("notifications").insert({
+        user_id: learnerId,
+        type: "certificate_issued",
+        title: "Certificate issued 🎓",
+        body: `Your certificate for ${eligibility.course.title || "this course"} is ready to download.`,
+        href: "/achievements",
+        payload: { courseId, certificateId: issued.certificate.id },
+      });
     }
-
-    const detail = await loadCertificateDetail(db, inserted.id as string);
-    if (detail) await storeCertificatePdf(db, detail);
-    await awardBadge(db, learnerId, "first_course");
-    await db.from("notifications").insert({
-      user_id: learnerId,
-      type: "certificate_issued",
-      title: "Certificate issued 🎓",
-      body: `Your certificate for ${course.title} is ready to download.`,
-      href: "/achievements",
-      payload: { courseId, certificateId: inserted.id },
-    });
-    return { certificate: inserted, alreadyIssued: false };
+    return issued;
   }, () => ({ error: { status: 503, message: "Certificates need a configured database", code: "DB_REQUIRED" } }));
 
   if ("error" in result) return fail(res, result.error.status, result.error.message, result.error.code);

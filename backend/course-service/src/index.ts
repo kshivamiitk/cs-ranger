@@ -380,6 +380,13 @@ app.get("/:id/detail", async (req, res) => {
 const blankToUndef = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => (v === "" || v === null ? undefined : v), schema);
 
+const CertificateTemplate = z.object({
+  heading: z.string().max(80).optional(),
+  body: z.string().max(120).optional(),
+  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  footerNote: z.string().max(120).optional(),
+}).strict().optional();
+
 // Field names are snake_case to match the frontend payload (Course/CourseNode types)
 // and the DB columns. (They were camelCase before, which silently dropped category_id,
 // thumbnail_url, video_url, static_website, quiz_payload, etc. on create.)
@@ -396,6 +403,9 @@ const CourseCreate = z.object({
   price: z.number().int().min(0).default(0),
   discounted_price: blankToUndef(z.number().int().min(0).optional()),
   certificate_enabled: z.boolean().default(true),
+  certificate_min_progress: z.number().int().min(1).max(100).default(100),
+  certificate_require_quiz_pass: z.boolean().default(false),
+  certificate_template: CertificateTemplate,
 });
 
 app.post("/", requireRole("creator", "admin"), async (req, res) => {
@@ -409,7 +419,11 @@ app.post("/", requireRole("creator", "admin"), async (req, res) => {
       category_id: d.category_id, language: d.language, level: d.level, tags: d.tags,
       thumbnail_url: d.thumbnail_url, promo_video_url: d.promo_video_url,
       price: d.price, discounted_price: d.discounted_price,
-      certificate_enabled: d.certificate_enabled, status: "draft",
+      certificate_enabled: d.certificate_enabled,
+      certificate_min_progress: d.certificate_min_progress,
+      certificate_require_quiz_pass: d.certificate_require_quiz_pass,
+      certificate_template: d.certificate_template || {},
+      status: "draft",
     }).select("*").single();
     if (error) throw error;
     // Auto-grant the creator the edit lock right after creation. The new-
@@ -496,6 +510,9 @@ app.patch("/:id", requireRole("creator", "admin"), async (req, res) => {
       thumbnail_url: p.thumbnail_url, promo_video_url: p.promo_video_url,
       price: pricing.price, discounted_price: pricing.discounted_price,
       certificate_enabled: p.certificate_enabled,
+      certificate_min_progress: p.certificate_min_progress,
+      certificate_require_quiz_pass: p.certificate_require_quiz_pass,
+      certificate_template: p.certificate_template,
     }).eq("id", req.params.id).select("*").maybeSingle();
     if (error) throw error;
     return data;
@@ -1660,6 +1677,28 @@ app.delete("/:id/lock", requireAuth, async (req, res) => {
 });
 
 // ─── Storage quota endpoints ──────────────────────────────────────
+app.get("/storage/admin/overview", requireRole("admin"), async (_req, res) => {
+  const data = await withDb(async (db) => {
+    const { data: overview, error } = await db.rpc("admin_storage_overview");
+    if (error) throw error;
+    return overview as Record<string, unknown>;
+  }, {
+    databaseBytes: 0,
+    supabaseStorageBytes: 0,
+    supabaseStorageObjects: 0,
+    supabaseStorageByBucket: [],
+    trackedUploadBytes: 0,
+    trackedUploadObjects: 0,
+    trackedUploadByBucket: [],
+    creatorStorageBytes: 0,
+    staticWebsiteBytes: 0,
+    pendingUploadBytes: 0,
+    activePurchasedBytes: 0,
+    generatedAt: new Date().toISOString(),
+  });
+  ok(res, data);
+});
+
 // Read-only view of the caller's current usage + pricing. Frontend
 // renders the "75% full · buy 5 MB" indicator from this.
 app.get("/storage/usage", requireRole("creator", "admin"), async (req, res) => {
