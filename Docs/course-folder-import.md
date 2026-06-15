@@ -3,6 +3,7 @@
 Use the importer when you have many lessons and do not want to add each one manually in the creator UI.
 
 ```bash
+
 npm run course:import -- ./path/to/course --api https://learnrift.site/api
 ```
 
@@ -26,6 +27,14 @@ Sign in with Google in the browser. LearnRift sends the session back to the impo
 You can login or refresh the saved CLI session without importing:
 
 ```bash
+unset LEARNRIFT_ACCESS_TOKEN ACCESS_TOKEN
+npm run course:login -- --api https://learnrift.site/api
+```
+
+If you previously exported a copied token in the same terminal, remove it before retrying:
+
+```bash
+unset LEARNRIFT_ACCESS_TOKEN ACCESS_TOKEN
 npm run course:login -- --api https://learnrift.site/api
 ```
 

@@ -19,6 +19,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { Avatar } from "@/components/common/Avatar";
+import { CourseShareButton } from "@/components/common/CourseShareButton";
 import { FileUpload } from "@/components/common/FileUpload";
 import { NodeEditor } from "@/components/creator/NodeEditor";
 import { CreatorTermsModal } from "@/components/creator/CreatorTermsModal";
@@ -636,6 +637,7 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {course.id && <CourseShareButton courseId={course.id} label="Copy link" showViewLink />}
             <button onClick={onSave} disabled={busy || publishing || !canEdit} className="btn-ghost disabled:opacity-50">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : savedFlash && status !== "published" ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
               {busy ? "Saving…" : savedFlash && status !== "published" ? "Saved" : "Save draft"}

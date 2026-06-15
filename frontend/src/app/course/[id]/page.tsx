@@ -8,6 +8,7 @@ import { Star, Clock, Users, Award, Globe, BarChart3, Bookmark, BookmarkCheck, L
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { Avatar } from "@/components/common/Avatar";
+import { CourseShareButton } from "@/components/common/CourseShareButton";
 import { FollowButton } from "@/components/common/FollowButton";
 import { useRazorpayCheckout } from "@/components/common/RazorpayCheckout";
 import { api } from "@/lib/api";
@@ -219,6 +220,7 @@ export default function CourseDetailPage() {
                       {isBookmarked ? <><BookmarkCheck className="h-4 w-4 text-brand" /> Bookmarked</> : <><Bookmark className="h-4 w-4" /> Bookmark</>}
                     </button>
                   )}
+                  <CourseShareButton courseId={course.id} label="Copy course link" className="mt-2 w-full" buttonClassName="w-full" />
                   <div className="mt-5 space-y-2 border-t border-border pt-4 text-xs text-fg-dim">
                     <Row icon={<BarChart3 className="h-4 w-4" />} text={`Level: ${course.level || "All Levels"}`} />
                     {course.duration_seconds ? <Row icon={<Clock className="h-4 w-4" />} text={`${durationFromSeconds(course.duration_seconds)} of content`} /> : null}

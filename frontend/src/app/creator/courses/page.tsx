@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, BarChart3, Pencil, Loader2, Trash2, AlertCircle } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
+import { CourseShareButton } from "@/components/common/CourseShareButton";
 import { api } from "@/lib/api";
 import { useApp } from "@/app/providers";
 import { formatCompact, formatINR } from "@/lib/utils";
@@ -79,6 +80,7 @@ export default function CreatorCoursesPage() {
                     <td className="p-3">★ {(c.rating_avg || 0).toFixed(1)}</td>
                     <td className="p-3 text-right">
                       <Link href={`/creator/courses/${c.id}/analytics`} className="inline-flex items-center gap-1 text-xs text-brand mr-3"><BarChart3 className="h-3 w-3" /> Analytics</Link>
+                      <CourseShareButton courseId={c.id} variant="inline" showViewLink className="mr-3" />
                       <Link href={`/creator/courses/${c.id}/edit`} className="inline-flex items-center gap-1 text-xs text-fg-dim hover:text-fg"><Pencil className="h-3 w-3" /> Edit</Link>
                       <button
                         onClick={() => { if (confirm(`Delete "${c.title}"? This can't be undone. (Blocked if anyone has purchased it.)`)) del.mutate(c.id); }}

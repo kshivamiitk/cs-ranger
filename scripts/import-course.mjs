@@ -326,15 +326,11 @@ function waitForBrowserLogin(webUrl) {
 }
 
 async function resolveAccessToken(args, apiUrl, webUrl) {
-  const explicit = args.token || process.env.LEARNRIFT_ACCESS_TOKEN || process.env.ACCESS_TOKEN || "";
-  if (explicit) return explicit;
+  if (args.token) return args.token;
 
   const file = tokenCachePath(args.tokenFile);
   if (!args.login) {
     const cached = await cachedCredentials(file, apiUrl);
-    if (cached?.accessToken && isTokenFresh(cached.accessToken)) {
-      return cached.accessToken;
-    }
     if (cached?.refreshToken) {
       try {
         const refreshed = await refreshCachedCredentials(apiUrl, file, webUrl, cached);
@@ -344,7 +340,13 @@ async function resolveAccessToken(args, apiUrl, webUrl) {
         console.warn(`Warning: Cached LearnRift session could not be refreshed: ${e.message}`);
       }
     }
+    if (cached?.accessToken && isTokenFresh(cached.accessToken)) {
+      return cached.accessToken;
+    }
   }
+
+  const envToken = process.env.LEARNRIFT_ACCESS_TOKEN || process.env.ACCESS_TOKEN || "";
+  if (!args.login && envToken) return envToken;
 
   if (args.noBrowserLogin) {
     throw new Error("Missing access token. Run with --login, remove --no-browser-login, or set LEARNRIFT_ACCESS_TOKEN.");
@@ -353,8 +355,8 @@ async function resolveAccessToken(args, apiUrl, webUrl) {
   const credentials = await waitForBrowserLogin(webUrl);
   await saveCredentials(file, apiUrl, webUrl, credentials);
   console.log(`Saved LearnRift CLI session to ${file}`);
-  if (isTokenFresh(credentials.accessToken)) return credentials.accessToken;
   const refreshed = await refreshCachedCredentials(apiUrl, file, webUrl, credentials);
+  console.log("Verified LearnRift CLI session with the API.");
   return refreshed.accessToken;
 }
 
@@ -735,7 +737,8 @@ async function main() {
 
   const api = new ApiClient(baseUrl, token);
   const course = await importCourse(plan, api, { keepPartial: args.keepPartial, publish: args.publish });
-  console.log(`Done. ${args.publish ? "Course URL" : "Draft course URL"}: /creator/courses/${course.id}/edit`);
+  console.log(`Done. Course page URL: ${webUrl}/course/${course.id}`);
+  console.log(`Creator edit URL: ${webUrl}/creator/courses/${course.id}/edit`);
 }
 
 main().catch((e) => {
