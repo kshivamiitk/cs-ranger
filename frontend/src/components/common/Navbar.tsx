@@ -39,6 +39,7 @@ const ADMIN_LINKS = [
   { href: "/admin/overview", label: "Overview" },
   { href: "/admin/payouts", label: "Payouts" },
   { href: "/admin/support", label: "Support" },
+  { href: "/admin/broadcast", label: "Broadcast" },
   { href: "/admin/users", label: "Users" },
   { href: "/admin/courses", label: "Courses" },
   { href: "/admin/storage", label: "Storage" },

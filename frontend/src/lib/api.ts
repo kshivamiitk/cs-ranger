@@ -579,6 +579,14 @@ export const api = {
     reviewReport: (id: string) => unwrap<{ reviewed: boolean }>(axiosClient().post(`/courses/admin/reports/${id}/reviewed`, {})),
     suspendReportedCourse: (id: string) => unwrap<{ suspended: boolean; courseId: string }>(axiosClient().post(`/courses/admin/reports/${id}/suspend-course`, {})),
     storageOverview: () => unwrap<AdminStorageOverview>(axiosClient().get("/courses/storage/admin/overview")),
+    // Broadcast: one admin message to every targeted account (in-app + email).
+    broadcast: (b: { subject: string; message: string; audience: BroadcastAudience; channels: { email: boolean; inapp: boolean } }) =>
+      unwrap<BroadcastResult>(axiosClient().post("/notifications/admin/broadcast", b)),
+    broadcastAudience: (audience: BroadcastAudience) =>
+      unwrap<{ audience: BroadcastAudience; recipientCount: number; emailEligible: number }>(
+        axiosClient().get("/notifications/admin/broadcast/audience", { params: { audience } }),
+      ),
+    broadcastHistory: () => unwrap<BroadcastHistoryEntry[]>(axiosClient().get("/notifications/admin/broadcasts")),
   },
 };
 
@@ -963,6 +971,35 @@ export interface AdminRoleRequest {
   reviewed_at?: string | null;
   target?: AdminActorRef | null;
   requester?: AdminActorRef | null;
+}
+
+// ─── Admin broadcast ─────────────────────────────────────────────
+export type BroadcastAudience = "all" | "learners" | "creators";
+
+export interface BroadcastResult {
+  audience: BroadcastAudience;
+  recipientCount: number;      // accounts targeted (in-app reach)
+  inappCreated: number;        // in-app notifications written
+  emailTargeted: number;       // verified addresses we attempted
+  emailSent: number;
+  emailFailed: number;
+}
+
+export interface BroadcastHistoryEntry {
+  id: number;
+  admin_id: string;
+  created_at: string;
+  metadata: {
+    subject?: string;
+    audience?: BroadcastAudience;
+    channels?: { email?: boolean; inapp?: boolean };
+    recipientCount?: number;
+    emailTargeted?: number;
+    emailSent?: number;
+    emailFailed?: number;
+    inappCreated?: number;
+  };
+  admin?: { email: string; profiles?: { display_name?: string } | null } | null;
 }
 
 export interface FailedPayoutItem {

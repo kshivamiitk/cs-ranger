@@ -1,4 +1,5 @@
-import { createService, ok, paginate, mock, requireAuth, withDb, consume, Topics, sendEmail, emailLayout, sendRealtimeNotification } from "@cs-ranger/shared";
+import { createService, ok, fail, paginate, mock, requireAuth, requireRole, withDb, consume, Topics, sendEmail, sendBulkEmail, emailLayout, sendRealtimeNotification, writeAuditLog } from "@cs-ranger/shared";
+import { z } from "zod";
 
 const { app, listen, log } = createService("notification-service");
 const PORT = Number(process.env.PORT_NOTIFICATION || 4009);
@@ -144,6 +145,158 @@ app.put("/preferences", requireAuth, async (req, res) => {
     return null;
   }, null);
   ok(res, { saved: true });
+});
+
+// ─── Admin broadcast ──────────────────────────────────────────────
+// One admin message fanned out to every targeted account over two channels:
+// an in-app notification (single bulk insert) and a transactional email
+// (batched, one private message per recipient). Every send is audited.
+const BroadcastSchema = z.object({
+  subject: z.string().trim().min(3, "Subject must be at least 3 characters").max(150, "Subject is too long (max 150 characters)"),
+  message: z.string().trim().min(10, "Message must be at least 10 characters").max(5000, "Message is too long (max 5000 characters)"),
+  // "all" = every active user (learners AND creators) — the default broadcast.
+  audience: z.enum(["all", "learners", "creators"]).default("all"),
+  channels: z.object({ email: z.boolean(), inapp: z.boolean() }).default({ email: true, inapp: true }),
+}).strict();
+
+// Safety ceiling for a single synchronous send. Well above a realistic active
+// user base; a broadcast larger than this should go through a dedicated ESP
+// campaign, not this endpoint.
+const MAX_BROADCAST_RECIPIENTS = 5000;
+
+interface BroadcastRecipient { id: string; email: string; is_verified: boolean }
+
+async function resolveBroadcastRecipients(audience: "all" | "learners" | "creators"): Promise<BroadcastRecipient[]> {
+  return withDb(async (db) => {
+    if (audience === "all") {
+      const { data, error } = await db.from("users").select("id, email, is_verified").eq("is_suspended", false);
+      if (error) throw error;
+      return (data || []) as BroadcastRecipient[];
+    }
+    const role = audience === "creators" ? "creator" : "learner";
+    const { data, error } = await db
+      .from("users")
+      .select("id, email, is_verified, user_roles!inner(role)")
+      .eq("is_suspended", false)
+      .eq("user_roles.role", role);
+    if (error) throw error;
+    // The inner join on user_roles can repeat a user row; de-dupe by id.
+    const seen = new Set<string>();
+    const out: BroadcastRecipient[] = [];
+    for (const r of (data || []) as BroadcastRecipient[]) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      out.push({ id: r.id, email: r.email, is_verified: r.is_verified });
+    }
+    return out;
+  }, []);
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function broadcastHtml(subject: string, message: string): string {
+  // Admin-authored plain text → safe HTML: escape, then keep line breaks.
+  const body = escapeHtml(message).replace(/\n/g, "<br/>");
+  return emailLayout(
+    `<h1 style="margin:0 0 16px;font-size:22px;">${escapeHtml(subject)}</h1>
+     <div style="font-size:15px;line-height:1.7;color:#e2e8f0;">${body}</div>`,
+    { preheader: subject },
+  );
+}
+
+app.post("/admin/broadcast", requireRole("admin"), async (req, res) => {
+  const parsed = BroadcastSchema.safeParse(req.body);
+  if (!parsed.success) return fail(res, 400, parsed.error.issues[0].message, "VALIDATION");
+  const { subject, message, audience, channels } = parsed.data;
+  if (!channels.email && !channels.inapp) return fail(res, 400, "Select at least one channel (email or in-app).", "VALIDATION");
+
+  const recipients = await resolveBroadcastRecipients(audience);
+  if (recipients.length === 0) return fail(res, 400, "No active users match this audience.", "NO_RECIPIENTS");
+  if (recipients.length > MAX_BROADCAST_RECIPIENTS) {
+    return fail(res, 413, `This broadcast would reach ${recipients.length} users, above the ${MAX_BROADCAST_RECIPIENTS} per-send safety cap.`, "TOO_MANY_RECIPIENTS");
+  }
+
+  // In-app: a single bulk insert (one Supabase round trip for the whole audience).
+  // No per-user realtime ping here — that would be thousands of socket messages;
+  // the bell picks the rows up on its next poll.
+  let inappCreated = 0;
+  if (channels.inapp) {
+    inappCreated = await withDb(async (db) => {
+      const rows = recipients.map((u) => ({
+        user_id: u.id,
+        type: "broadcast",
+        title: subject,
+        body: message,
+        payload: { broadcast: true, audience },
+      }));
+      const { error } = await db.from("notifications").insert(rows);
+      if (error) throw error;
+      return rows.length;
+    }, 0);
+  }
+
+  // Email: only to verified addresses (unverified accounts never confirmed the
+  // mailbox — sending risks bounces / spam complaints against our domain).
+  const emailTargets = channels.email ? recipients.filter((u) => u.is_verified && u.email).map((u) => u.email) : [];
+  const emailResult = emailTargets.length
+    ? await sendBulkEmail({ to: emailTargets, subject, html: broadcastHtml(subject, message), text: message })
+    : { total: 0, sent: 0, failed: 0 };
+
+  await writeAuditLog({
+    adminId: req.user!.id,
+    action: "broadcast.send",
+    targetType: "broadcast",
+    metadata: {
+      subject, audience, channels,
+      recipientCount: recipients.length,
+      emailTargeted: emailTargets.length,
+      emailSent: emailResult.sent,
+      emailFailed: emailResult.failed,
+      inappCreated,
+    },
+  });
+  log.info("admin broadcast sent", { audience, recipientCount: recipients.length, emailSent: emailResult.sent, emailFailed: emailResult.failed, inappCreated });
+
+  ok(res, {
+    audience,
+    recipientCount: recipients.length,
+    inappCreated,
+    emailTargeted: emailTargets.length,
+    emailSent: emailResult.sent,
+    emailFailed: emailResult.failed,
+  });
+});
+
+// Audience preview — how many accounts a broadcast would reach, and how many
+// of those have a verified address (the email-eligible subset). Lets the admin
+// confirm the blast radius before sending something irreversible.
+app.get("/admin/broadcast/audience", requireRole("admin"), async (req, res) => {
+  const raw = String(req.query.audience || "all");
+  const audience = (["all", "learners", "creators"].includes(raw) ? raw : "all") as "all" | "learners" | "creators";
+  const recipients = await resolveBroadcastRecipients(audience);
+  ok(res, {
+    audience,
+    recipientCount: recipients.length,
+    emailEligible: recipients.filter((u) => u.is_verified && u.email).length,
+  });
+});
+
+// Broadcast history — derived from the immutable admin_audit_log (no extra
+// table needed); each "broadcast.send" row carries the full delivery summary.
+app.get("/admin/broadcasts", requireRole("admin"), async (_req, res) => {
+  const rows = await withDb(async (db) => {
+    const { data, error } = await db
+      .from("admin_audit_log")
+      .select("id, admin_id, metadata, created_at, admin:users!admin_audit_log_admin_id_fkey(email, profiles(display_name))")
+      .eq("action", "broadcast.send")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    return data || [];
+  }, []);
+  ok(res, rows);
 });
 
 listen(PORT);

@@ -37,6 +37,72 @@ export async function sendEmail(opts: SendOpts): Promise<{ ok: boolean; id?: str
   return { ok: true, id: res.data?.id };
 }
 
+export interface BulkSendOpts {
+  /** One recipient per email — each address gets its OWN message (never CC'd together). */
+  to: string[];
+  subject: string;
+  html: string;
+  text?: string;
+  replyTo?: string;
+}
+
+export interface BulkSendResult {
+  /** Unique addresses we attempted to deliver to. */
+  total: number;
+  sent: number;
+  failed: number;
+}
+
+/**
+ * Fan a single message out to many recipients (admin broadcasts, announcements).
+ *
+ * Privacy: every recipient gets a SEPARATE email with only their own address in
+ * `to` — we never put the whole audience in one To/CC header. Resend's batch
+ * endpoint sends up to 100 individual messages per call, so we chunk the list
+ * and pace the calls to stay under the provider's rate limit. Returns per-status
+ * counts so callers can record/report delivery.
+ *
+ * Dev fallback (no RESEND_API_KEY): logs the recipient count and reports every
+ * address as "sent" so broadcast flows stay testable without a provider.
+ */
+export async function sendBulkEmail(opts: BulkSendOpts): Promise<BulkSendResult> {
+  // De-dupe + drop blanks so the count is honest and nobody is mailed twice.
+  const recipients = Array.from(new Set(opts.to.map((e) => e?.trim()).filter(Boolean))) as string[];
+  const total = recipients.length;
+  if (total === 0) return { total: 0, sent: 0, failed: 0 };
+
+  const c = client();
+  if (!c) {
+    console.log(JSON.stringify({ level: "info", msg: "[email:dev] bulk broadcast", count: total, subject: opts.subject }));
+    return { total, sent: total, failed: 0 };
+  }
+
+  const from = process.env.EMAIL_FROM || "LearnRift <no-reply@learnrift.site>";
+  const replyTo = opts.replyTo || process.env.EMAIL_REPLY_TO;
+  const CHUNK = 100; // Resend batch limit.
+  let sent = 0;
+  let failed = 0;
+
+  for (let i = 0; i < recipients.length; i += CHUNK) {
+    const chunk = recipients.slice(i, i + CHUNK);
+    try {
+      const res = await c.batch.send(
+        chunk.map((to) => ({ from, to: [to], subject: opts.subject, html: opts.html, text: opts.text, replyTo })),
+      );
+      if (res.error) failed += chunk.length;
+      else sent += chunk.length;
+    } catch {
+      // A batch call that throws (network/5xx) fails only its own chunk; keep going.
+      failed += chunk.length;
+    }
+    // Gentle pacing between batches so a large broadcast doesn't trip the
+    // provider's per-second rate limit. Skipped after the final chunk.
+    if (i + CHUNK < recipients.length) await new Promise((r) => setTimeout(r, 250));
+  }
+
+  return { total, sent, failed };
+}
+
 /**
  * Wrap content in the platform's HTML email shell.
  */
