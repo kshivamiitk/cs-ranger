@@ -7,8 +7,8 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { useApp } from "@/app/providers";
 import {
   ArrowLeft, ArrowRight, Award, Bookmark, BookmarkCheck, CheckCircle2, ChevronDown, ChevronRight,
-  ExternalLink, FileText, ListChecks, Maximize2, MessageSquare, Minimize2, Paperclip, Play, Sparkles, Loader2,
-  StickyNote, Timer, X, Folder,
+  ExternalLink, FileText, FileType, ListChecks, Maximize2, MessageSquare, Minimize2, MousePointerClick,
+  Paperclip, Play, Sparkles, Loader2, StickyNote, Timer, X, Folder,
 } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Avatar } from "@/components/common/Avatar";
@@ -578,8 +578,8 @@ function NodeIcon({ type }: { type: CourseNode["type"] }) {
     video: <Play className="h-3.5 w-3.5" />,
     markdown: <FileText className="h-3.5 w-3.5" />,
     quiz: <ListChecks className="h-3.5 w-3.5" />,
-    pdf: <FileText className="h-3.5 w-3.5" />,
-    static_website: <FileText className="h-3.5 w-3.5" />,
+    pdf: <FileType className="h-3.5 w-3.5" />,
+    static_website: <MousePointerClick className="h-3.5 w-3.5" />,
     folder: <Folder className="h-3.5 w-3.5" />,
   };
   return <span className="shrink-0">{map[type]}</span>;

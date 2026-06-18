@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Star, Clock, Users, Award, Globe, BarChart3, Bookmark, BookmarkCheck, Lock, Play, FileText, ListChecks, FileType, Loader2, AlertCircle, Pencil, Check, Flag, Folder } from "lucide-react";
+import { Star, Clock, Users, Award, Globe, BarChart3, Bookmark, BookmarkCheck, Lock, Play, FileText, ListChecks, FileType, MousePointerClick, Loader2, AlertCircle, Pencil, Check, Flag, Folder } from "lucide-react";
 import { Navbar } from "@/components/common/Navbar";
 import { Footer } from "@/components/common/Footer";
 import { Avatar } from "@/components/common/Avatar";
@@ -343,7 +343,7 @@ function NodeTypeIcon({ type }: { type: string }) {
     markdown: <FileText className="h-3.5 w-3.5" />,
     quiz: <ListChecks className="h-3.5 w-3.5" />,
     pdf: <FileType className="h-3.5 w-3.5" />,
-    static_website: <FileText className="h-3.5 w-3.5" />,
+    static_website: <MousePointerClick className="h-3.5 w-3.5" />,
     folder: <Folder className="h-3.5 w-3.5" />,
   };
   return <span className="text-fg-dim">{map[type] ?? <FileText className="h-3.5 w-3.5" />}</span>;
