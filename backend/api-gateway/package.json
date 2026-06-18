@@ -8,11 +8,11 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "express": "^5.0.1",
+    "@cs-ranger/shared": "*",
     "cors": "^2.8.5",
-    "http-proxy-middleware": "^3.0.3",
-    "jsonwebtoken": "^9.0.2",
-    "@cs-ranger/shared": "*"
+    "express": "^5.0.1",
+    "http-proxy-middleware": "^3.0.6",
+    "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.7"
