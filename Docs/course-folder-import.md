@@ -75,10 +75,67 @@ Supported lesson files:
 
 - `.md`, `.markdown`, `.txt` -> markdown lesson
 - `.pdf` -> PDF lesson, uploaded through the signed-upload API
+- `.quiz.json` -> real quiz lesson (a LearnRift `quiz` node — see "Quiz lessons" below)
 - nested folder -> curriculum folder
 - static site folder -> static website lesson
 
 Unsupported files are skipped with warnings so repo folders containing files like `package.json` or images do not break the import. Static website lessons currently store the HTML/CSS/JS payload only; binary assets are not bundled into the static lesson.
+
+## Quiz lessons
+
+A `*.quiz.json` file is imported as a **real LearnRift quiz node** (`type: "quiz"`), not as markdown and not as a static website. Use the naming convention:
+
+```text
+01 Quiz — Topic Name.quiz.json
+```
+
+The number prefix orders it like any other lesson; the title comes from the JSON `title` field if present, otherwise from the file name (with the `.quiz.json` suffix stripped).
+
+Two JSON shapes are accepted.
+
+**1. Full wrapper** (recommended — lets you set the timer, passing score, and title):
+
+```json
+{
+  "title": "Quiz: Regression",
+  "timerSeconds": 600,
+  "passingPercent": 70,
+  "questions": [
+    {
+      "id": "regression-q01",
+      "prompt": "Question text",
+      "options": ["A", "B", "C", "D"],
+      "correctIndex": 1,
+      "explanation": "Why this answer is correct."
+    }
+  ]
+}
+```
+
+**2. Bare question array:**
+
+```json
+[
+  {
+    "id": "regression-q01",
+    "prompt": "Question text",
+    "options": ["A", "B", "C", "D"],
+    "correctIndex": 1,
+    "explanation": "Why this answer is correct."
+  }
+]
+```
+
+Validation (the importer fails the import with a clear message if any rule is broken, so problems get fixed rather than silently skipped):
+
+- At least **5 questions** per quiz.
+- Every question needs a non-empty `id`, a `prompt`, `options`, and a `correctIndex`. Ids must be unique within the quiz (e.g. `regression-q01`, `regression-q02`).
+- `options` must be **exactly 4** non-empty strings — the backend `quiz_payload` schema requires length 4.
+- `correctIndex` must be an integer `0`, `1`, `2`, or `3`.
+- `explanation` is optional but strongly recommended; a question without one imports fine but emits a warning.
+- `timerSeconds` and `passingPercent` are optional integers (used only in the wrapper shape).
+
+The dry-run plan counts quizzes separately, e.g. `… lessons (40 markdown, 4 pdf, 21 static sites, 14 quizzes)`.
 
 ## Optional Metadata
 

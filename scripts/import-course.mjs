@@ -7,6 +7,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".txt"]);
 const PDF_MAX_BYTES = 25 * 1024 * 1024;
@@ -37,6 +38,7 @@ Folder shape:
     Module 01/
       Lesson.md                 markdown lesson
       Notes.pdf                 pdf lesson
+      Quiz — Topic.quiz.json    real quiz node (JSON: bare array or { questions, timerSeconds, passingPercent })
       Folder/
         Nested Lesson.md
       Static Lesson/            any folder with direct HTML/CSS/JS files
@@ -360,7 +362,7 @@ async function resolveAccessToken(args, apiUrl, webUrl) {
   return refreshed.accessToken;
 }
 
-function titleFromName(name) {
+export function titleFromName(name) {
   return name
     .replace(/\.[^.]+$/, "")
     .replace(/^[\d._ -]+/, "")
@@ -440,7 +442,86 @@ function lessonTitleFromMarkdown(markdown, fallback) {
   return h1 || fallback;
 }
 
+// ── Quiz import (.quiz.json) ──────────────────────────────────────
+// A `<NN> Quiz — Topic.quiz.json` file becomes a real LearnRift quiz node
+// (type "quiz"), NOT markdown and NOT a static website. The JSON is either a
+// bare question array or a full wrapper { timerSeconds?, passingPercent?,
+// title?, questions: [...] }. We validate against the backend quiz_payload
+// schema (NodeCreate in course-service): exactly 4 string options, correctIndex
+// in 0..3, and require at least 5 questions. Structural problems throw (so they
+// surface as import errors to fix); a question with no explanation is a soft
+// warning since explanations are strongly recommended but optional.
+export function normalizeQuiz(parsed, file, warnings) {
+  let questionsRaw;
+  let timerSeconds;
+  let passingPercent;
+  let title;
+  if (Array.isArray(parsed)) {
+    questionsRaw = parsed;
+  } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.questions)) {
+    questionsRaw = parsed.questions;
+    if (typeof parsed.timerSeconds === "number") timerSeconds = Math.trunc(parsed.timerSeconds);
+    if (typeof parsed.passingPercent === "number") passingPercent = Math.trunc(parsed.passingPercent);
+    if (typeof parsed.title === "string" && parsed.title.trim()) title = parsed.title.trim();
+  } else {
+    throw new Error(`${file}: quiz JSON must be an array of questions or an object with a "questions" array.`);
+  }
+
+  if (questionsRaw.length < 5) {
+    throw new Error(`${file}: a quiz needs at least 5 questions (found ${questionsRaw.length}).`);
+  }
+
+  const seenIds = new Set();
+  const questions = questionsRaw.map((q, i) => {
+    const where = `${file} (question ${i + 1})`;
+    if (!q || typeof q !== "object") throw new Error(`${where}: each question must be an object.`);
+    if (typeof q.id !== "string" || !q.id.trim()) throw new Error(`${where}: missing a non-empty "id".`);
+    if (seenIds.has(q.id)) throw new Error(`${where}: duplicate question id "${q.id}".`);
+    seenIds.add(q.id);
+    if (typeof q.prompt !== "string" || !q.prompt.trim()) throw new Error(`${where}: missing "prompt".`);
+    if (!Array.isArray(q.options) || q.options.length !== 4 || !q.options.every((o) => typeof o === "string" && o.trim().length > 0)) {
+      throw new Error(`${where}: "options" must be exactly 4 non-empty strings (the backend schema requires length 4).`);
+    }
+    if (!Number.isInteger(q.correctIndex) || q.correctIndex < 0 || q.correctIndex > 3) {
+      throw new Error(`${where}: "correctIndex" must be an integer 0, 1, 2 or 3.`);
+    }
+    const hasExplanation = typeof q.explanation === "string" && q.explanation.trim().length > 0;
+    if (!hasExplanation) warnings.push(`Quiz question has no explanation: ${where} (id "${q.id}")`);
+    return {
+      id: q.id,
+      prompt: q.prompt,
+      options: q.options,
+      correctIndex: q.correctIndex,
+      ...(hasExplanation ? { explanation: q.explanation } : {}),
+    };
+  });
+
+  const quiz_payload = {
+    ...(timerSeconds !== undefined ? { timerSeconds } : {}),
+    ...(passingPercent !== undefined ? { passingPercent } : {}),
+    questions,
+  };
+  return { quiz_payload, title };
+}
+
+async function lessonFromQuizFile(file, warnings) {
+  let parsed;
+  try {
+    parsed = JSON.parse(await fs.readFile(file, "utf8"));
+  } catch (e) {
+    throw new Error(`Invalid JSON in quiz file ${file}: ${e.message}`);
+  }
+  const { quiz_payload, title } = normalizeQuiz(parsed, file, warnings);
+  const fallbackTitle = titleFromName(path.basename(file).replace(/\.quiz\.json$/i, ""));
+  return { kind: "lesson", type: "quiz", title: title || fallbackTitle, quiz_payload };
+}
+
 async function lessonFromFile(file, warnings) {
+  // A `.quiz.json` file is a real quiz node, not markdown/pdf. Check this before
+  // the extension switch (its extname is just ".json").
+  if (file.toLowerCase().endsWith(".quiz.json")) {
+    return await lessonFromQuizFile(file, warnings);
+  }
   const ext = path.extname(file).toLowerCase();
   const fallbackTitle = titleFromName(path.basename(file));
   if (TEXT_EXTENSIONS.has(ext)) {
@@ -552,8 +633,8 @@ async function buildPlan(folder, titleOverride) {
   return { root, course, modules, warnings };
 }
 
-function summarize(plan) {
-  let markdown = 0, pdf = 0, staticSites = 0, folders = 0;
+export function summarize(plan) {
+  let markdown = 0, pdf = 0, staticSites = 0, quizzes = 0, folders = 0;
   const visit = (item) => {
     if (item.kind === "folder") {
       folders++;
@@ -563,11 +644,12 @@ function summarize(plan) {
     if (item.type === "markdown") markdown++;
     if (item.type === "pdf") pdf++;
     if (item.type === "static_website") staticSites++;
+    if (item.type === "quiz") quizzes++;
   };
   for (const mod of plan.modules) {
     for (const item of mod.items) visit(item);
   }
-  return { modules: plan.modules.length, folders, lessons: markdown + pdf + staticSites, markdown, pdf, staticSites };
+  return { modules: plan.modules.length, folders, lessons: markdown + pdf + staticSites + quizzes, markdown, pdf, staticSites, quizzes };
 }
 
 async function confirm(question) {
@@ -650,6 +732,8 @@ async function createItem(api, moduleId, item, parentNodeId, depth) {
     payload = { moduleId, parent_node_id: parentNodeId, type: "pdf", title: item.title, pdf_url };
   } else if (item.type === "markdown") {
     payload = { moduleId, parent_node_id: parentNodeId, type: "markdown", title: item.title, markdown: item.markdown };
+  } else if (item.type === "quiz") {
+    payload = { moduleId, parent_node_id: parentNodeId, type: "quiz", title: item.title, quiz_payload: item.quiz_payload };
   } else {
     payload = { moduleId, parent_node_id: parentNodeId, type: "static_website", title: item.title, static_website: item.static_website };
   }
@@ -721,7 +805,7 @@ async function main() {
 
   console.log(`Course: ${plan.course.title}`);
   console.log(`Path: ${plan.root}`);
-  console.log(`Import plan: ${counts.modules} modules, ${counts.folders} folders, ${counts.lessons} lessons (${counts.markdown} markdown, ${counts.pdf} pdf, ${counts.staticSites} static sites)`);
+  console.log(`Import plan: ${counts.modules} modules, ${counts.folders} folders, ${counts.lessons} lessons (${counts.markdown} markdown, ${counts.pdf} pdf, ${counts.staticSites} static sites, ${counts.quizzes} quizzes)`);
   for (const warning of plan.warnings) console.warn(`Warning: ${warning}`);
   for (const mod of plan.modules) {
     console.log(`  - ${mod.title}`);
@@ -741,7 +825,13 @@ async function main() {
   console.log(`Creator edit URL: ${webUrl}/creator/courses/${course.id}/edit`);
 }
 
-main().catch((e) => {
-  console.error(`Import failed: ${e.message}`);
-  process.exit(1);
-});
+// Only run the CLI when this file is executed directly (`node scripts/import-course.mjs`),
+// not when it is imported (e.g. by the unit tests, which exercise normalizeQuiz/summarize/
+// titleFromName as pure functions without triggering an import run).
+const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+  main().catch((e) => {
+    console.error(`Import failed: ${e.message}`);
+    process.exit(1);
+  });
+}
