@@ -153,58 +153,17 @@ export function Player({ course, initialNodeId }: { course: Course; initialNodeI
     setAutoAdvanceLeft(5);
   }, [activeId]);
 
-  // ── Scroll tracking (markdown / pdf / static_website): 80% read = complete ──
+  // ── Lesson completion is MANUAL ──────────────────────────────────────────
+  // Reading lessons (markdown / pdf / static_website) are NOT auto-completed
+  // from scrolling, dwell time, or PDF pages viewed — that marked a lesson done
+  // within seconds of opening it. A reading lesson is completed only when the
+  // learner clicks "Mark complete" (advance() → markDone, which sends
+  // { markDone: true }). Quizzes still complete on a pass; videos on reaching
+  // the end. We keep the scroll container ref + handler stubs so the lesson box
+  // and PDF viewer wiring stays valid, but they never report progress.
   const lessonBoxRef = useRef<HTMLElement | null>(null);
-  const maxScrollRef = useRef(0);
-  const lastSentScrollRef = useRef(0);
-  const dwellStartRef = useRef(Date.now());
-  const isScrollTracked = !!node && (node.type === "markdown" || node.type === "pdf" || node.type === "static_website");
-
-  useEffect(() => {
-    maxScrollRef.current = 0;
-    lastSentScrollRef.current = 0;
-    dwellStartRef.current = Date.now();
-  }, [activeId]);
-
-  const handleLessonScroll = useCallback(() => {
-    const el = lessonBoxRef.current;
-    if (!el || !isScrollTracked) return;
-    const pct = el.scrollHeight <= el.clientHeight + 4
-      ? 100
-      : Math.min(100, Math.round(((el.scrollTop + el.clientHeight) / el.scrollHeight) * 100));
-    if (pct > maxScrollRef.current) maxScrollRef.current = pct;
-    if (maxScrollRef.current >= 80 && lastSentScrollRef.current < 80 && !completedSet.has(activeId)) {
-      lastSentScrollRef.current = maxScrollRef.current;
-      reportProgress(activeId, { scrollPercent: maxScrollRef.current });
-    }
-  }, [activeId, isScrollTracked, completedSet, reportProgress]);
-
-  // Periodic flush + "fits without scrolling" dwell rule (10s on the lesson counts as read).
-  useEffect(() => {
-    if (!isScrollTracked) return;
-    const id = setInterval(() => {
-      const el = lessonBoxRef.current;
-      if (!el) return;
-      const fits = el.scrollHeight <= el.clientHeight + 4;
-      if (fits && Date.now() - dwellStartRef.current >= 10_000) maxScrollRef.current = 100;
-      if (maxScrollRef.current > lastSentScrollRef.current) {
-        lastSentScrollRef.current = maxScrollRef.current;
-        reportProgress(activeId, { scrollPercent: maxScrollRef.current });
-      }
-    }, 10_000);
-    return () => clearInterval(id);
-  }, [activeId, isScrollTracked, reportProgress]);
-
-  // PDF "pages viewed" feeds the same scroll-percent channel the completion
-  // engine already evaluates for pdf nodes (≥80% = complete), so paging with
-  // the viewer's next/prev buttons counts the same as scrolling.
-  const handlePdfProgress = useCallback((percentViewed: number) => {
-    if (percentViewed > maxScrollRef.current) maxScrollRef.current = percentViewed;
-    if (maxScrollRef.current >= 80 && lastSentScrollRef.current < 80 && !completedSet.has(activeIdRef.current)) {
-      lastSentScrollRef.current = maxScrollRef.current;
-      reportProgress(activeIdRef.current, { scrollPercent: maxScrollRef.current });
-    }
-  }, [completedSet, reportProgress]);
+  const handleLessonScroll = useCallback(() => {}, []);
+  const handlePdfProgress = useCallback((_percentViewed: number) => {}, []);
 
   // ── Video + quiz callbacks ──
   const handleVideoProgress = useCallback((signal: VideoProgressSignal) => {

@@ -442,6 +442,32 @@ function lessonTitleFromMarkdown(markdown, fallback) {
   return h1 || fallback;
 }
 
+// ── Quiz text formatting ──────────────────────────────────────────
+// Quiz prompts/options/explanations are rendered as rich HTML in the player
+// (SafeHtml → innerHTML), which collapses raw newlines to a single space. So a
+// plain-text prompt that embeds a multi-line code snippet renders jammed onto
+// one line. This converts such plain-text fields into safe HTML: the source
+// `.quiz.json` stays clean (a question sentence, a blank line, then the code
+// block), and the importer wraps each blank-line-separated multi-line block in
+// <pre><code> (HTML-escaped, newlines preserved) and each prose block in <p>.
+// Fields that are already HTML, or single-line, or only prose paragraphs, are
+// returned untouched so existing inline markup is preserved.
+export function formatQuizText(value) {
+  if (typeof value !== "string" || !value.includes("\n")) return value;
+  if (/<(?:pre|code|p|br|ul|ol|li|img|strong|em|b|i)\b/i.test(value)) return value;
+  const blocks = value.split(/\n{2,}/);
+  // Only rewrite when at least one block is a true multi-line (code/preformatted)
+  // block — otherwise it's ordinary prose and we leave it alone.
+  if (!blocks.some((block) => block.includes("\n"))) return value;
+  return blocks
+    .map((block) => {
+      const body = block.replace(/[ \t]+$/gm, "").replace(/\s+$/, "");
+      if (block.includes("\n")) return `<pre><code>${escapeHtml(body)}</code></pre>`;
+      return `<p>${escapeHtml(block.trim())}</p>`;
+    })
+    .join("");
+}
+
 // ── Quiz import (.quiz.json) ──────────────────────────────────────
 // A `<NN> Quiz — Topic.quiz.json` file becomes a real LearnRift quiz node
 // (type "quiz"), NOT markdown and NOT a static website. The JSON is either a
@@ -489,10 +515,10 @@ export function normalizeQuiz(parsed, file, warnings) {
     if (!hasExplanation) warnings.push(`Quiz question has no explanation: ${where} (id "${q.id}")`);
     return {
       id: q.id,
-      prompt: q.prompt,
-      options: q.options,
+      prompt: formatQuizText(q.prompt),
+      options: q.options.map(formatQuizText),
       correctIndex: q.correctIndex,
-      ...(hasExplanation ? { explanation: q.explanation } : {}),
+      ...(hasExplanation ? { explanation: formatQuizText(q.explanation) } : {}),
     };
   });
 
