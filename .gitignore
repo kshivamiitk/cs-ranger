@@ -34,6 +34,9 @@ coverage/
 
 # DB backups/dumps — contain emails + bcrypt password hashes, never commit
 backups/
+# Local course backup tarballs + one-off admin/maintenance scripts (never commit)
+.backups/
+backend/.grant-storage.mjs
 
 # Misc
 *business-setup*

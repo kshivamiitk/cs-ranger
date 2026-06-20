@@ -447,32 +447,32 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
     setModules((ms) => arrayMove(ms, from, to));
   }
 
-  function onLessonDragEnd(moduleLocalId: string, e: DragEndEvent) {
+  // Reorder a node within its container (the module root, or a folder). Each
+  // container is its own drag context (see ExplorerNodeTree), so `activeId` and
+  // `overId` are ALWAYS siblings — a lesson can never be dragged out of its
+  // folder. We find that sibling group, re-sort it, and rewrite only its
+  // `position` values. The flat `nodes` array order is unchanged, so node
+  // indices (and the current selection) stay valid; buildDraftNodeTree re-sorts
+  // siblings by the new positions on the next render.
+  function onNodeReorder(moduleLocalId: string, activeId: string, overId: string) {
     if (!guardEdit()) return;
-    const { active, over } = e;
-    if (!over || active.id === over.id) return;
-    const mi = modules.findIndex((m) => m._localId === moduleLocalId);
-    if (mi < 0) return;
-    const nodes = modules[mi].nodes;
-    const from = nodes.findIndex((n) => n._localId === active.id);
-    const to = nodes.findIndex((n) => n._localId === over.id);
-    if (from < 0 || to < 0) return;
-
-    // Remember the selected lesson's stable id so we can follow it to its new index.
-    const selectedLocalId =
-      selected.kind === "lesson" && selected.moduleLocalId === moduleLocalId
-        ? nodes[selected.nodeIndex]?._localId
-        : null;
-
-    const reordered = arrayMove(nodes, from, to);
-    const next = [...modules];
-    next[mi] = { ...modules[mi], nodes: reordered };
-    setModules(next);
-
-    if (selectedLocalId) {
-      const newIndex = reordered.findIndex((n) => n._localId === selectedLocalId);
-      if (newIndex >= 0) setSelected({ kind: "lesson", moduleLocalId, nodeIndex: newIndex });
-    }
+    if (!activeId || !overId || activeId === overId) return;
+    setModules((ms) => ms.map((m) => {
+      if (m._localId !== moduleLocalId) return m;
+      const newPos = new Map<string, number>();
+      const walk = (siblings: DraftNodeTree[]): boolean => {
+        const from = siblings.findIndex((n) => n._localId === activeId);
+        const to = siblings.findIndex((n) => n._localId === overId);
+        if (from >= 0 && to >= 0) {
+          arrayMove(siblings, from, to).forEach((n, i) => newPos.set(n._localId, i));
+          return true;
+        }
+        return siblings.some((n) => walk(n.children));
+      };
+      walk(buildDraftNodeTree(m.nodes));
+      if (newPos.size === 0) return m;
+      return { ...m, nodes: m.nodes.map((n) => (newPos.has(n._localId) ? { ...n, position: newPos.get(n._localId)! } : n)) };
+    }));
   }
 
   // Persist the whole draft. Idempotent: existing rows are updated (not re-created),
@@ -748,6 +748,7 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
                           onToggle={toggleExpand}
                           onDelete={removeLesson}
                           onAddChild={addLesson}
+                          onReorder={onNodeReorder}
                           adderOpenFor={adderOpenFor}
                           setAdderOpenFor={setAdderOpenFor}
                         />
@@ -898,7 +899,7 @@ function ExplorerActionButton({
 }
 
 function ExplorerNodeTree({
-  moduleLocalId, nodes, selected, expanded, canEdit, onSelect, onToggle, onDelete, onAddChild, adderOpenFor, setAdderOpenFor, depth = 2,
+  moduleLocalId, nodes, selected, expanded, canEdit, onSelect, onToggle, onDelete, onAddChild, onReorder, adderOpenFor, setAdderOpenFor, depth = 2,
 }: {
   moduleLocalId: string;
   nodes: DraftNodeTree[];
@@ -909,69 +910,93 @@ function ExplorerNodeTree({
   onToggle: (localId: string) => void;
   onDelete: (moduleLocalId: string, nodeIndex: number) => void;
   onAddChild: (moduleLocalId: string, type: CourseNode["type"], parent?: { id?: string; _localId: string }) => void;
+  onReorder: (moduleLocalId: string, activeId: string, overId: string) => void;
   adderOpenFor: string | null;
   setAdderOpenFor: React.Dispatch<React.SetStateAction<string | null>>;
   depth?: number;
 }) {
+  // Each container (this list of siblings) is its own drag context, so a node
+  // can be reordered up/down among its siblings but never dragged into a
+  // different folder or out to the module root. Nested folders render their own
+  // ExplorerNodeTree → their own context, so the same rule applies at every level.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   return (
-    <>
-      {nodes.map((node) => {
-        const isFolder = node.type === "folder";
-        const isOpen = !!expanded[node._localId];
-        const adderKey = `folder:${node._localId}`;
-        const lessonSelected =
-          selected.kind === "lesson" && selected.moduleLocalId === moduleLocalId && selected.nodeIndex === node._index;
-        return (
-          <div key={node._localId}>
-            <ExplorerRow
-              indent={depth}
-              selected={lessonSelected}
-              onClick={() => onSelect(moduleLocalId, node._index)}
-              onChevronClick={isFolder ? () => onToggle(node._localId) : undefined}
-              chevron={isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-              icon={isFolder ? (isOpen ? <FolderOpen className="h-4 w-4 text-fg-dim" /> : <Folder className="h-4 w-4 text-fg-dim" />) : lessonIcon(node.type)}
-              label={node.title || (isFolder ? "Untitled folder" : "Untitled lesson")}
-              variant={isFolder ? "folder" : "lesson"}
-              onAdd={isFolder && canEdit ? () => setAdderOpenFor(adderKey) : undefined}
-              addTitle="Add inside"
-              onDelete={canEdit ? () => onDelete(moduleLocalId, node._index) : undefined}
-            />
-            {isFolder && isOpen ? (
-              <div className="relative">
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none absolute bottom-1 top-1 w-px bg-fg-dim/25"
-                  style={{ left: 20 + depth * 16 }}
-                />
-                <ExplorerNodeTree
-                  moduleLocalId={moduleLocalId}
-                  nodes={node.children}
-                  selected={selected}
-                  expanded={expanded}
-                  canEdit={canEdit}
-                  onSelect={onSelect}
-                  onToggle={onToggle}
-                  onDelete={onDelete}
-                  onAddChild={onAddChild}
-                  adderOpenFor={adderOpenFor}
-                  setAdderOpenFor={setAdderOpenFor}
-                  depth={depth + 1}
-                />
-                {adderOpenFor === adderKey ? (
-                  <AddNodePicker
-                    open
-                    onClose={() => setAdderOpenFor(null)}
-                    onAdd={(type) => onAddChild(moduleLocalId, type, node)}
-                    indent={depth + 1}
-                    compact
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={(e) => {
+        const { active, over } = e;
+        if (over && active.id !== over.id) onReorder(moduleLocalId, String(active.id), String(over.id));
+      }}
+    >
+      <SortableContext items={nodes.map((n) => n._localId)} strategy={verticalListSortingStrategy}>
+        {nodes.map((node) => {
+          const isFolder = node.type === "folder";
+          const isOpen = !!expanded[node._localId];
+          const adderKey = `folder:${node._localId}`;
+          const lessonSelected =
+            selected.kind === "lesson" && selected.moduleLocalId === moduleLocalId && selected.nodeIndex === node._index;
+          return (
+            <div key={node._localId}>
+              <Sortable id={node._localId} disabled={!canEdit}>
+                {(dragHandle) => (
+                  <ExplorerRow
+                    indent={depth}
+                    selected={lessonSelected}
+                    onClick={() => onSelect(moduleLocalId, node._index)}
+                    onChevronClick={isFolder ? () => onToggle(node._localId) : undefined}
+                    chevron={isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    icon={isFolder ? (isOpen ? <FolderOpen className="h-4 w-4 text-fg-dim" /> : <Folder className="h-4 w-4 text-fg-dim" />) : lessonIcon(node.type)}
+                    label={node.title || (isFolder ? "Untitled folder" : "Untitled lesson")}
+                    variant={isFolder ? "folder" : "lesson"}
+                    onAdd={isFolder && canEdit ? () => setAdderOpenFor(adderKey) : undefined}
+                    addTitle="Add inside"
+                    onDelete={canEdit ? () => onDelete(moduleLocalId, node._index) : undefined}
+                    dragHandle={dragHandle}
                   />
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </>
+                )}
+              </Sortable>
+              {isFolder && isOpen ? (
+                <div className="relative">
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute bottom-1 top-1 w-px bg-fg-dim/25"
+                    style={{ left: 20 + depth * 16 }}
+                  />
+                  <ExplorerNodeTree
+                    moduleLocalId={moduleLocalId}
+                    nodes={node.children}
+                    selected={selected}
+                    expanded={expanded}
+                    canEdit={canEdit}
+                    onSelect={onSelect}
+                    onToggle={onToggle}
+                    onDelete={onDelete}
+                    onAddChild={onAddChild}
+                    onReorder={onReorder}
+                    adderOpenFor={adderOpenFor}
+                    setAdderOpenFor={setAdderOpenFor}
+                    depth={depth + 1}
+                  />
+                  {adderOpenFor === adderKey ? (
+                    <AddNodePicker
+                      open
+                      onClose={() => setAdderOpenFor(null)}
+                      onAdd={(type) => onAddChild(moduleLocalId, type, node)}
+                      indent={depth + 1}
+                      compact
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </SortableContext>
+    </DndContext>
   );
 }
 

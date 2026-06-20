@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 // It exports its pure helpers so the quiz-import logic — the part that mirrors
 // the backend `quiz_payload` Zod schema (exactly 4 options, correctIndex 0..3,
 // >= 5 questions) — can be unit-tested without hitting the API or the network.
-import { normalizeQuiz, summarize, titleFromName } from "../../scripts/import-course.mjs";
+import { formatQuizText, normalizeQuiz, summarize, titleFromName } from "../../scripts/import-course.mjs";
 
 // A valid question with the 4-option / 0..3 shape the backend requires.
 const q = (id: string, correctIndex = 0) => ({
@@ -137,6 +137,44 @@ describe("summarize — dry-run plan counts quizzes separately", () => {
       quizzes: 2,
     });
     expect(counts.lessons).toBe(5); // markdown + pdf + static + quizzes
+  });
+});
+
+describe("formatQuizText — multi-line code becomes <pre><code> so it renders on its own lines", () => {
+  it("wraps a blank-line-separated code block, keeping the question as prose", () => {
+    const out = formatQuizText("What does this print?\n\nimport numpy as np\nprint(np.mean([1, 2, 3]))");
+    expect(out).toBe("<p>What does this print?</p><pre><code>import numpy as np\nprint(np.mean([1, 2, 3]))</code></pre>");
+    // The newline inside the code block survives (that is the whole point).
+    expect(out).toContain("np\nprint");
+  });
+
+  it("escapes HTML-special characters in the code so they are not parsed as tags", () => {
+    const out = formatQuizText("Trace it:\n\nfor i in range(3):\n    if a < b & c > d:\n        pass");
+    expect(out).toContain("&lt;");
+    expect(out).toContain("&gt;");
+    expect(out).toContain("&amp;");
+    expect(out).not.toMatch(/<(?!\/?(?:p|pre|code)\b)/); // no stray tags beyond p/pre/code
+  });
+
+  it("handles prose → code → prose (e.g. a confusion-matrix question)", () => {
+    const out = formatQuizText("Given this matrix:\n\nTN 90  FP 10\nFN 20  TP 30\n\nWhat is the recall?");
+    expect(out).toBe("<p>Given this matrix:</p><pre><code>TN 90  FP 10\nFN 20  TP 30</code></pre><p>What is the recall?</p>");
+  });
+
+  it("leaves single-line text, plain prose paragraphs, and existing HTML untouched", () => {
+    expect(formatQuizText("Just a normal one-line prompt.")).toBe("Just a normal one-line prompt.");
+    expect(formatQuizText("Para one.\n\nPara two.")).toBe("Para one.\n\nPara two."); // no multi-line block
+    expect(formatQuizText("Already <strong>rich</strong>\n\nwith lines\nhere")).toBe("Already <strong>rich</strong>\n\nwith lines\nhere");
+    expect(formatQuizText(undefined as unknown as string)).toBeUndefined();
+  });
+
+  it("is applied by normalizeQuiz to prompts on the way out", () => {
+    const withCode = [
+      { id: "c-1", prompt: "Run it:\n\nx = 1\nprint(x)", options: ["a", "b", "c", "d"], correctIndex: 0, explanation: "ok" },
+      ...fiveQs("b"),
+    ];
+    const { quiz_payload } = normalizeQuiz(withCode, "f.quiz.json", []);
+    expect(quiz_payload.questions[0].prompt).toBe("<p>Run it:</p><pre><code>x = 1\nprint(x)</code></pre>");
   });
 });
 
