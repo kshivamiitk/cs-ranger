@@ -197,6 +197,20 @@ app.post("/login", async (req, res) => {
   if ("suspended" in result) return fail(res, 403, "Your account has been suspended. Contact support.", "SUSPENDED");
   if ("unverified" in result) return fail(res, 403, "Email not verified", "UNVERIFIED");
 
+  // One active session per account: a fresh login revokes every other active
+  // session for this user, so a shared id/password can't keep two devices signed
+  // in at the same time. Refresh tokens are the session of record — the previous
+  // device keeps its short-lived access token (JWT_ACCESS_TTL) only until its next
+  // token refresh, which now fails (revoked) and signs it out. Done before issuing
+  // the new refresh token so this login's session survives.
+  await withDb(async (db) => {
+    await db.from("refresh_tokens")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("user_id", result.user.id)
+      .is("revoked_at", null);
+    return null;
+  }, null);
+
   const accessToken = signAccess(result.user.id, result.user.roles);
   const refreshToken = await issueRefresh(result.user.id);
   ok(res, { user: result.user, accessToken, refreshToken });
