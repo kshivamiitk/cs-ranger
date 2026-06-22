@@ -254,10 +254,11 @@ app.post("/admin/broadcast", requireRole("admin"), async (req, res) => {
       emailTargeted: emailTargets.length,
       emailSent: emailResult.sent,
       emailFailed: emailResult.failed,
+      emailError: emailResult.error,
       inappCreated,
     },
   });
-  log.info("admin broadcast sent", { audience, recipientCount: recipients.length, emailSent: emailResult.sent, emailFailed: emailResult.failed, inappCreated });
+  log.info("admin broadcast sent", { audience, recipientCount: recipients.length, emailSent: emailResult.sent, emailFailed: emailResult.failed, emailError: emailResult.error, inappCreated });
 
   ok(res, {
     audience,
@@ -266,6 +267,7 @@ app.post("/admin/broadcast", requireRole("admin"), async (req, res) => {
     emailTargeted: emailTargets.length,
     emailSent: emailResult.sent,
     emailFailed: emailResult.failed,
+    emailError: emailResult.error,
   });
 });
 

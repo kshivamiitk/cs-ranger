@@ -51,6 +51,8 @@ export interface BulkSendResult {
   total: number;
   sent: number;
   failed: number;
+  /** First provider/transport error seen, if any — so a failed broadcast is diagnosable. */
+  error?: string;
 }
 
 /**
@@ -82,6 +84,10 @@ export async function sendBulkEmail(opts: BulkSendOpts): Promise<BulkSendResult>
   const CHUNK = 100; // Resend batch limit.
   let sent = 0;
   let failed = 0;
+  // Remember the first failure reason. Without this the whole broadcast can
+  // report "all failed" with no clue why (bad/stale API key, unverified sender
+  // domain, rate limit, blocked egress) — the error used to be silently dropped.
+  let firstError: string | undefined;
 
   for (let i = 0; i < recipients.length; i += CHUNK) {
     const chunk = recipients.slice(i, i + CHUNK);
@@ -89,18 +95,26 @@ export async function sendBulkEmail(opts: BulkSendOpts): Promise<BulkSendResult>
       const res = await c.batch.send(
         chunk.map((to) => ({ from, to: [to], subject: opts.subject, html: opts.html, text: opts.text, replyTo })),
       );
-      if (res.error) failed += chunk.length;
-      else sent += chunk.length;
-    } catch {
+      if (res.error) {
+        failed += chunk.length;
+        firstError ??= res.error.message;
+        console.error(JSON.stringify({ level: "error", msg: "[email] bulk chunk rejected by Resend", reason: res.error.message, chunkSize: chunk.length }));
+      } else {
+        sent += chunk.length;
+      }
+    } catch (e) {
       // A batch call that throws (network/5xx) fails only its own chunk; keep going.
       failed += chunk.length;
+      const reason = e instanceof Error ? e.message : String(e);
+      firstError ??= reason;
+      console.error(JSON.stringify({ level: "error", msg: "[email] bulk chunk threw", reason, chunkSize: chunk.length }));
     }
     // Gentle pacing between batches so a large broadcast doesn't trip the
     // provider's per-second rate limit. Skipped after the final chunk.
     if (i + CHUNK < recipients.length) await new Promise((r) => setTimeout(r, 250));
   }
 
-  return { total, sent, failed };
+  return { total, sent, failed, error: firstError };
 }
 
 /**
