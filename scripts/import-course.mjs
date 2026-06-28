@@ -452,9 +452,33 @@ function lessonTitleFromMarkdown(markdown, fallback) {
 // <pre><code> (HTML-escaped, newlines preserved) and each prose block in <p>.
 // Fields that are already HTML, or single-line, or only prose paragraphs, are
 // returned untouched so existing inline markup is preserved.
+function formatFencedQuizText(value) {
+  const fence = /```([A-Za-z0-9_+-]*)?[^\n]*\n([\s\S]*?)```/g;
+  let out = "";
+  let last = 0;
+  let matched = false;
+  const prose = (text) => text
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => `<p>${escapeHtml(part).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+
+  for (const match of value.matchAll(fence)) {
+    matched = true;
+    out += prose(value.slice(last, match.index));
+    const lang = match[1] ? ` class="language-${escapeHtml(match[1])}"` : "";
+    out += `<pre><code${lang}>${escapeHtml(match[2].replace(/\s+$/, ""))}</code></pre>`;
+    last = (match.index || 0) + match[0].length;
+  }
+  out += prose(value.slice(last));
+  return matched ? out : value;
+}
+
 export function formatQuizText(value) {
   if (typeof value !== "string" || !value.includes("\n")) return value;
   if (/<(?:pre|code|p|br|ul|ol|li|img|strong|em|b|i)\b/i.test(value)) return value;
+  if (value.includes("```")) return formatFencedQuizText(value);
   const blocks = value.split(/\n{2,}/);
   // Only rewrite when at least one block is a true multi-line (code/preformatted)
   // block — otherwise it's ordinary prose and we leave it alone.

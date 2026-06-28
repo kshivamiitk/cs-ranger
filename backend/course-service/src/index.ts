@@ -420,19 +420,21 @@ app.get("/", async (req, res) => {
   ok(res, list.items, { page, pageSize, total: list.total });
 });
 
-// ─── Creator's own courses (all statuses) ────────────────────────
+// ─── Creator's own active courses ────────────────────────────────
 // Defined before "/:id" so the literal "/mine" path is not captured by the
 // id param. Scoped server-side to the authenticated creator — replaces the old
 // pattern of fetching the whole published catalog and filtering by creator_id
-// on the client (which also hid the creator's drafts/under-review courses).
+// on the client. Archived courses are operational tombstones for audit/payment
+// history and should not clutter the creator dashboard.
 app.get("/mine", requireAuth, async (req, res) => {
   const list = await withDb(async (db) => {
     const { data } = await db.from("courses")
       .select(COURSE_SUMMARY_COLS)
       .eq("creator_id", req.user!.id)
+      .neq("status", "archived")
       .order("created_at", { ascending: false });
     return (data || []) as unknown as Course[];
-  }, () => mock.courses.filter((c) => c.creatorId === req.user!.id));
+  }, () => mock.courses.filter((c) => c.creatorId === req.user!.id && c.status !== "archived"));
   ok(res, list);
 });
 
