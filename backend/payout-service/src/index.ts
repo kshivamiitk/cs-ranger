@@ -2,6 +2,7 @@ import express from "express";
 import { createService, ok, fail, requireAuth, requireRole, withDb, isSupabaseConfigured, razorpay, isRazorpayConfigured, verifyWebhookSignature, publish, Topics, getPlatformSetting, writeAuditLog, buildAnnualStatementPdf, type StatementMonthRow } from "@cs-ranger/shared";
 import { z } from "zod";
 import { ACCOUNT_NUMBER, dispatchRazorpayPayout, settleMockPayout, runBulkPayout, runDueScheduledPayouts, readPayoutSchedule, minPayoutPaise } from "./bulk.js";
+import { razorpayIdempotencyKey, razorpayReferenceId } from "./ids.js";
 import { currentPayoutWindow, nextPayoutWindowOpensAt } from "./scheduler.js";
 
 const { app, listen, log } = createService("payout-service");
@@ -22,7 +23,8 @@ const KycSchema = z.object({
   { message: "Provide bank details or UPI ID" });
 
 app.post("/kyc/:creatorId", requireAuth, async (req, res) => {
-  if (req.user!.id !== req.params.creatorId && req.user!.role !== "admin") {
+  const creatorId = String(req.params.creatorId);
+  if (req.user!.id !== creatorId && req.user!.role !== "admin") {
     return fail(res, 403, "Forbidden", "FORBIDDEN");
   }
   const parsed = KycSchema.safeParse(req.body);
@@ -46,7 +48,7 @@ app.post("/kyc/:creatorId", requireAuth, async (req, res) => {
           email: d.email,
           contact: d.contactNumber,
           type: "vendor",
-          reference_id: `creator_${req.params.creatorId}`,
+          reference_id: razorpayReferenceId("creator", creatorId),
         }),
       });
       const contact = await contactResp.json() as { id?: string; error?: { description?: string } };
@@ -86,7 +88,7 @@ app.post("/kyc/:creatorId", requireAuth, async (req, res) => {
   // bulk Razorpay payouts are unavailable (see /offplatform/queue below).
   await withDb(async (db) => {
     await db.from("kyc_details").upsert({
-      creator_id: req.params.creatorId,
+      creator_id: creatorId,
       razorpay_contact_id: contactId,
       razorpay_fund_account_id: fundAccountId,
       kyc_status: isRazorpayConfigured() ? "pending" : "approved",
@@ -108,9 +110,10 @@ app.post("/kyc/:creatorId", requireAuth, async (req, res) => {
 app.get("/kyc/:creatorId", requireAuth, async (req, res) => {
   // Ownership: KYC holds bank/UPI/contact details — only the creator themself or
   // an admin may read it. (The POST already checks this; the GET did not.)
-  if (req.user!.id !== req.params.creatorId && req.user!.role !== "admin") return fail(res, 403, "Forbidden", "FORBIDDEN");
+  const creatorId = String(req.params.creatorId);
+  if (req.user!.id !== creatorId && req.user!.role !== "admin") return fail(res, 403, "Forbidden", "FORBIDDEN");
   const row = await withDb(async (db) => {
-    const { data } = await db.from("kyc_details").select("*").eq("creator_id", req.params.creatorId).maybeSingle();
+    const { data } = await db.from("kyc_details").select("*").eq("creator_id", creatorId).maybeSingle();
     return data;
   }, null);
   if (!row) return fail(res, 404, "No KYC record", "NOT_FOUND");
@@ -237,8 +240,8 @@ app.post("/manual", requireRole("admin"), async (req, res) => {
     const dispatched = await dispatchRazorpayPayout({
       fundAccountId: creator.kyc!.razorpay_fund_account_id,
       amountPaise,
-      idempotencyKey: `manual-${runId}-${creatorId}`,
-      referenceId: `run_${runId}_${creatorId}`,
+      idempotencyKey: razorpayIdempotencyKey("manual", runId, creatorId),
+      referenceId: razorpayReferenceId("manual", runId, creatorId),
       narration: "LearnRift manual payout",
     });
     if (dispatched.error) { status = "failed"; errorMsg = dispatched.error; }
@@ -484,8 +487,8 @@ app.post("/:payoutItemId/retry", requireRole("admin"), async (req, res) => {
     const dispatched = await dispatchRazorpayPayout({
       fundAccountId: kyc.razorpay_fund_account_id,
       amountPaise: item.amount,
-      idempotencyKey: `retry-${item.id}-${attempt}`,
-      referenceId: `retry_${item.id}_${attempt}`,
+      idempotencyKey: razorpayIdempotencyKey("retry", item.id, attempt),
+      referenceId: razorpayReferenceId("retry", item.id, attempt),
       narration: "LearnRift payout retry",
     });
     if (dispatched.error) { status = "failed"; errorMsg = dispatched.error; }

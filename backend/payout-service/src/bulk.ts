@@ -1,4 +1,5 @@
 import { withDb, isRazorpayConfigured, getPlatformSetting, writeAuditLog } from "@cs-ranger/shared";
+import { razorpayIdempotencyKey, razorpayReferenceId } from "./ids.js";
 import { currentPayoutWindow, PAYOUT_SCHEDULES, type PayoutSchedule } from "./scheduler.js";
 
 export const ACCOUNT_NUMBER = process.env.RAZORPAY_ACCOUNT_NUMBER || ""; // platform's RazorpayX virtual account
@@ -102,8 +103,8 @@ export async function runBulkPayout(opts: { initiatedBy: string | null; notes?: 
       const dispatched = await dispatchRazorpayPayout({
         fundAccountId: e.kyc_details.razorpay_fund_account_id,
         amountPaise: e.pending,
-        idempotencyKey: `${runId}-${e.creator_id}`,
-        referenceId: `run_${runId}_${e.creator_id}`,
+        idempotencyKey: razorpayIdempotencyKey("bulk", runId, e.creator_id),
+        referenceId: razorpayReferenceId("bulk", runId, e.creator_id),
       });
       if (dispatched.error) { status = "failed"; errorMsg = dispatched.error; }
       else payoutId = dispatched.payoutId;
