@@ -150,6 +150,7 @@ The dry-run plan counts quizzes separately, e.g. `… lessons (40 markdown, 4 pd
   "level": "All Levels",
   "tags": ["DSA", "C++"],
   "price": 0,
+  "welcome_message": "Welcome to the course. Start with Module 1 and post doubts after each lesson.",
   "certificate_enabled": true,
   "certificate_min_progress": 100,
   "certificate_require_quiz_pass": false

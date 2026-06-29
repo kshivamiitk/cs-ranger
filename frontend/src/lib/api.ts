@@ -618,6 +618,7 @@ export interface Course {
   status?: "draft" | "under_review" | "published" | "archived";
   price?: number;
   discounted_price?: number;
+  welcome_message?: string;
   certificate_enabled?: boolean;
   certificate_min_progress?: number;
   certificate_require_quiz_pass?: boolean;

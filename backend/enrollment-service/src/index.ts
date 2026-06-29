@@ -1,4 +1,4 @@
-import { createService, ok, fail, requireAuth, withDb, supabaseAdmin, isSupabaseConfigured, consume, Topics, publish } from "@cs-ranger/shared";
+import { createService, ok, fail, requireAuth, withDb, supabaseAdmin, isSupabaseConfigured, consume, Topics, publish, sendCourseIntroEmail } from "@cs-ranger/shared";
 import { z } from "zod";
 import { applyProgress, getNodeCore, onCourseCompleted, recomputeCourseProgress, type CourseProgressResult } from "./completion.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -21,19 +21,44 @@ async function canAccessCourse(db: SupabaseClient, userId: string, role: string 
 const { app, listen, log } = createService("enrollment-service");
 const PORT = Number(process.env.PORT_ENROLLMENT || 4004);
 
-// ─── Listen for payment.verified → create enrollment ─────────────
+async function sendCourseIntroBestEffort(learnerId: string, courseId: string, enrollmentId?: string | null): Promise<void> {
+  const result = await withDb((db) => sendCourseIntroEmail(db, { learnerId, courseId, enrollmentId }), null);
+  if (result && !result.skipped && !result.emailSent) {
+    log.warn("course intro email was not sent", { learnerId, courseId, reason: result.reason });
+  }
+}
+
+// ─── Listen for payment.verified → legacy enrollment fallback ────
 consume<{ paymentId: string; courseId: string; learnerId: string; amount: number }>(Topics.PAYMENT_VERIFIED, async ({ courseId, learnerId }) => {
-  await withDb(async (db) => {
-    // Idempotent: unique(learner_id, course_id) prevents duplicates
-    const { data } = await db.from("enrollments").insert({
-      learner_id: learnerId, course_id: courseId, progress_percent: 0,
-    }).select("id").maybeSingle();
-    if (data) {
-      await publish(Topics.ENROLLMENT_CREATED, { enrollmentId: data.id, learnerId, courseId });
+  const enrollment = await withDb(async (db) => {
+    const { data: existing, error: readError } = await db.from("enrollments")
+      .select("id").eq("learner_id", learnerId).eq("course_id", courseId).maybeSingle();
+    if (readError) throw readError;
+    if (existing) return { id: (existing as { id: string }).id, created: false };
+
+    // verify_payment() normally creates paid access inside the payment
+    // transaction. This path is only a compatibility fallback for older/manual
+    // payment.verified publishers, so give the learner the same 30-day window.
+    const { data, error } = await db.from("enrollments").insert({
+      learner_id: learnerId,
+      course_id: courseId,
+      progress_percent: 0,
+      access_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    }).select("id").single();
+    if (error) {
+      if ((error as { code?: string }).code === "23505") return { id: null, created: false };
+      throw error;
     }
-    return null;
+    return { id: (data as { id: string }).id, created: true };
   }, null);
-  log.info("enrollment created from payment.verified", { courseId, learnerId });
+
+  if (enrollment?.created && enrollment.id) {
+    await sendCourseIntroBestEffort(learnerId, courseId, enrollment.id);
+    await publish(Topics.ENROLLMENT_CREATED, { enrollmentId: enrollment.id, learnerId, courseId });
+    log.info("enrollment created from payment.verified fallback", { courseId, learnerId });
+  } else {
+    log.info("payment.verified enrollment already exists", { courseId, learnerId });
+  }
 });
 
 // ─── Listen for payment.refunded → revoke enrollment ──────────────
@@ -118,6 +143,7 @@ app.post("/", requireAuth, async (req, res) => {
   }, null);
   if (!result) return fail(res, 409, "Already enrolled", "ALREADY_ENROLLED");
 
+  await sendCourseIntroBestEffort(req.user!.id, course.id, result.id);
   await publish(Topics.ENROLLMENT_CREATED, { enrollmentId: result.id, learnerId: req.user!.id, courseId: course.id });
   res.status(201);
   ok(res, result);

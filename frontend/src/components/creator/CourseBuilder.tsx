@@ -35,6 +35,7 @@ interface DraftCourse {
   language: string; tags: string[];
   thumbnail_url?: string; promo_video_url?: string;
   price: number; discounted_price?: number;
+  welcome_message?: string;
   certificate_enabled: boolean;
   certificate_min_progress: number;
   certificate_require_quiz_pass: boolean;
@@ -221,7 +222,9 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
       title: existing.title || "", subtitle: existing.subtitle || "", description: existing.description || "",
       category_id: existing.category_id || undefined, level: existing.level || "All Levels", language: existing.language || "English",
       tags: existing.tags || [], thumbnail_url: existing.thumbnail_url || undefined, promo_video_url: existing.promo_video_url || undefined,
-      price: existing.price || 0, discounted_price: existing.discounted_price || undefined, certificate_enabled: existing.certificate_enabled ?? true,
+      price: existing.price || 0, discounted_price: existing.discounted_price || undefined,
+      welcome_message: existing.welcome_message || "",
+      certificate_enabled: existing.certificate_enabled ?? true,
       certificate_min_progress: existing.certificate_min_progress ?? 100,
       certificate_require_quiz_pass: existing.certificate_require_quiz_pass ?? false,
       certificate_template: existing.certificate_template || {},
@@ -487,6 +490,7 @@ export function CourseBuilder({ courseId }: { courseId?: string }) {
       category_id: course.category_id, level: course.level, language: course.language, tags: course.tags,
       thumbnail_url: course.thumbnail_url, promo_video_url: course.promo_video_url,
       price: course.price, discounted_price: course.discounted_price, certificate_enabled: course.certificate_enabled,
+      welcome_message: course.welcome_message,
       certificate_min_progress: course.certificate_min_progress,
       certificate_require_quiz_pass: course.certificate_require_quiz_pass,
       certificate_template: course.certificate_template,
@@ -1164,6 +1168,19 @@ function CoursePanel({
             <Field label="Discounted price (optional)"><input type="number" className="input" value={course.discounted_price ?? ""} onChange={(e) => setCourse({ ...course, discounted_price: e.target.value ? Number(e.target.value) : undefined })} /></Field>
           </div>
         )}
+      </Section>
+
+      <Section title="Intro email">
+        <Field label="Message sent after enrollment" hint="Optional plain text. Line breaks are kept in the email.">
+          <textarea
+            rows={6}
+            maxLength={5000}
+            value={course.welcome_message || ""}
+            onChange={(e) => setCourse({ ...course, welcome_message: e.target.value })}
+            className="input min-h-[150px]"
+            placeholder="Welcome to the course. Start with the first lesson, and use the doubts tab whenever you get stuck."
+          />
+        </Field>
       </Section>
 
       <Section title="Settings">

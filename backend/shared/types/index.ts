@@ -27,6 +27,7 @@ export interface Course {
   tags: string[]; thumbnail: string; promoVideoUrl?: string;
   status: "draft" | "under_review" | "published" | "archived";
   price: number; discountedPrice?: number; certificateEnabled: boolean;
+  welcomeMessage?: string;
   enrollmentCount: number; rating: number; ratingCount: number; durationSeconds: number;
   modules: Module[]; createdAt: string; updatedAt: string;
 }

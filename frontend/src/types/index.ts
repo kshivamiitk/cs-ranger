@@ -74,6 +74,7 @@ export interface Course {
   status: "draft" | "under_review" | "published" | "archived";
   price: number; // INR
   discountedPrice?: number;
+  welcomeMessage?: string;
   certificateEnabled: boolean;
   enrollmentCount: number;
   rating: number;

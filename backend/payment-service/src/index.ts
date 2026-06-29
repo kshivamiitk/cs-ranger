@@ -1,4 +1,4 @@
-import { createService, ok, fail, mock, requireAuth, requireRole, withDb, supabaseAdmin, isSupabaseConfigured, razorpay, isRazorpayConfigured, verifyWebhookSignature, verifyPaymentSignature, publish, Topics, getPlatformSetting, writeAuditLog } from "@cs-ranger/shared";
+import { createService, ok, fail, mock, requireAuth, requireRole, withDb, supabaseAdmin, isSupabaseConfigured, razorpay, isRazorpayConfigured, verifyWebhookSignature, verifyPaymentSignature, publish, Topics, getPlatformSetting, writeAuditLog, sendCourseIntroEmail } from "@cs-ranger/shared";
 import { z } from "zod";
 import { chargeableAmountPaise, decideWebhookAction, pickCapturablePayment, type PaymentStatus } from "./logic.js";
 
@@ -59,6 +59,25 @@ async function ensureEnrollment(learnerId: string, courseId: string): Promise<vo
     if (error) throw error;
     return null;
   }, null);
+}
+
+async function hasEnrollment(learnerId: string, courseId: string): Promise<boolean> {
+  return withDb(async (db) => {
+    const { data, error } = await db.from("enrollments")
+      .select("id")
+      .eq("learner_id", learnerId)
+      .eq("course_id", courseId)
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
+  }, false);
+}
+
+async function sendCourseIntroBestEffort(learnerId: string, courseId: string): Promise<void> {
+  const result = await withDb((db) => sendCourseIntroEmail(db, { learnerId, courseId }), null);
+  if (result && !result.skipped && !result.emailSent) {
+    log.warn("course intro email was not sent", { learnerId, courseId, reason: result.reason });
+  }
 }
 
 // ─── Create Razorpay order ───────────────────────────────────────
@@ -210,13 +229,15 @@ app.post("/verify", requireAuth, async (req, res) => {
   // return 403 BEFORE the verify_payment RPC mutates state.
   const preCheck = await withDb(async (db) => {
     const { data } = await db.from("payments")
-      .select("learner_id")
+      .select("learner_id, course_id")
       .eq("razorpay_order_id", razorpay_order_id)
       .maybeSingle();
-    return data as { learner_id?: string } | null;
+    return data as { learner_id?: string; course_id?: string } | null;
   }, null);
   if (!preCheck) return fail(res, 404, "Payment not found", "NOT_FOUND");
   if (preCheck.learner_id !== req.user!.id) return fail(res, 403, "Not your payment", "FORBIDDEN");
+  if (!preCheck.course_id) return fail(res, 404, "Payment not found", "NOT_FOUND");
+  const hadEnrollmentBeforePayment = await hasEnrollment(req.user!.id, preCheck.course_id);
 
   // Atomic: status transition + enrollment insert + wallet ledger entries
   // happen in a single SQL function so partial failures roll back. Returns
@@ -236,6 +257,7 @@ app.post("/verify", requireAuth, async (req, res) => {
   await ensureEnrollment(result.learner_id, result.course_id);
 
   if (result.transitioned) {
+    if (!hadEnrollmentBeforePayment) await sendCourseIntroBestEffort(result.learner_id, result.course_id);
     await publish(Topics.PAYMENT_VERIFIED, {
       paymentId: result.payment_id, courseId: result.course_id, learnerId: result.learner_id, amount: result.amount_paise,
     });
@@ -294,6 +316,7 @@ async function reconcileOrder(orderId: string, expectedLearnerId: string | null)
 
   // Captured at Razorpay but not settled locally → run the same atomic path the
   // webhook uses. verify_payment is idempotent; only publish on a real transition.
+  const hadEnrollmentBeforePayment = await hasEnrollment(payment.learner_id, payment.course_id);
   const verify = await runVerifyPayment(orderId, captured!.id, null);
   if (!verify.ok) {
     // RPC failed (the Postgres cause is logged). Do NOT report success — that
@@ -304,6 +327,7 @@ async function reconcileOrder(orderId: string, expectedLearnerId: string | null)
   // Money is ours and the payment is finalized — guarantee access.
   await ensureEnrollment(payment.learner_id, payment.course_id);
   if (result?.transitioned) {
+    if (!hadEnrollmentBeforePayment) await sendCourseIntroBestEffort(result.learner_id, result.course_id);
     await publish(Topics.PAYMENT_VERIFIED, {
       paymentId: result.payment_id, courseId: result.course_id, learnerId: result.learner_id, amount: result.amount_paise,
     });
@@ -407,9 +431,11 @@ app.post("/webhook", async (req, res) => {
   // "never walk a payment backwards" and "captured == authorized == money is
   // ours" rules are unit-tested. refunded/terminal states resolve to ignore.
   const status = (orderRow as { status: PaymentStatus }).status;
+  const order = orderRow as { learner_id: string; course_id: string; status: PaymentStatus };
   const action = decideWebhookAction(event, status);
 
   if (action.kind === "verify") {
+    const hadEnrollmentBeforePayment = await hasEnrollment(order.learner_id, order.course_id);
     const verify = await runVerifyPayment(payment.order_id, payment.id!, eventId ?? null);
     if (!verify.ok) {
       // Return non-2xx so Razorpay retries the webhook (a transient failure may
@@ -419,6 +445,7 @@ app.post("/webhook", async (req, res) => {
     const result = verify.row;
     if (result?.payment_id) await ensureEnrollment(result.learner_id, result.course_id);
     if (result?.transitioned) {
+      if (!hadEnrollmentBeforePayment) await sendCourseIntroBestEffort(result.learner_id, result.course_id);
       await publish(Topics.PAYMENT_VERIFIED, {
         paymentId: result.payment_id, courseId: result.course_id, learnerId: result.learner_id, amount: result.amount_paise,
       });

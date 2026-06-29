@@ -1,9 +1,8 @@
-import { createService, ok, fail, paginate, mock, requireAuth, requireRole, withDb, consume, Topics, sendEmail, sendBulkEmail, emailLayout, sendRealtimeNotification, writeAuditLog } from "@cs-ranger/shared";
+import { createService, ok, fail, paginate, mock, requireAuth, requireRole, withDb, consume, Topics, sendBulkEmail, emailLayout, sendRealtimeNotification, writeAuditLog, sendCourseIntroEmail } from "@cs-ranger/shared";
 import { z } from "zod";
 
 const { app, listen, log } = createService("notification-service");
 const PORT = Number(process.env.PORT_NOTIFICATION || 4009);
-const APP_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
 
 async function createNotif(userId: string, type: string, title: string, body: string, href?: string, payload: Record<string, unknown> = {}) {
   await withDb(async (db) => {
@@ -21,27 +20,7 @@ consume<{ userId: string; email: string; displayName: string }>(Topics.USER_REGI
 });
 
 consume<{ enrollmentId: string; learnerId: string; courseId: string }>(Topics.ENROLLMENT_CREATED, async ({ learnerId, courseId }) => {
-  const course = await withDb(async (db) => {
-    const { data } = await db.from("courses").select("title, creator_id").eq("id", courseId).maybeSingle();
-    return data;
-  }, null);
-  if (!course) return;
-  await createNotif(learnerId, "enrollment", "Enrollment confirmed", `Welcome to ${course.title}!`, `/course/${courseId}/learn/start`);
-  // Email
-  const learner = await withDb(async (db) => {
-    const { data: profile } = await db.from("profiles").select("display_name").eq("user_id", learnerId).maybeSingle();
-    const { data: user } = await db.from("users").select("email").eq("id", learnerId).maybeSingle();
-    return { displayName: profile?.display_name, email: user?.email };
-  }, () => ({ displayName: "Learner", email: "" }));
-  if (learner.email) {
-    await sendEmail({
-      to: learner.email,
-      subject: `Welcome to ${course.title}`,
-      html: emailLayout(`<h1>You're enrolled, ${learner.displayName?.split(" ")[0] || "there"}!</h1>
-        <p>Your spot in <b>${course.title}</b> is confirmed.</p>
-        <p style="margin:24px 0;"><a href="${APP_URL}/course/${courseId}" style="display:inline-block;padding:12px 24px;border-radius:999px;background:linear-gradient(135deg,#a78bfa,#22d3ee);color:white;text-decoration:none;font-weight:600;">Start learning</a></p>`),
-    });
-  }
+  await withDb((db) => sendCourseIntroEmail(db, { learnerId, courseId }), null);
 });
 
 consume<{ enrollmentId: string; learnerId: string; courseId: string }>(Topics.ENROLLMENT_COMPLETED, async ({ learnerId, courseId }) => {

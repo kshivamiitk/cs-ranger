@@ -1,4 +1,6 @@
 import { Resend } from "resend";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { sendRealtimeNotification } from "./realtime.js";
 
 let _resend: Resend | null = null;
 function client(): Resend | null {
@@ -53,6 +55,129 @@ export interface BulkSendResult {
   failed: number;
   /** First provider/transport error seen, if any — so a failed broadcast is diagnosable. */
   error?: string;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function firstName(name?: string | null): string {
+  return name?.trim().split(/\s+/)[0] || "there";
+}
+
+function textToHtmlParagraphs(text: string): string {
+  const paragraphs = text.trim().split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  return paragraphs.map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br/>")}</p>`).join("");
+}
+
+function defaultCourseIntroMessage(courseTitle: string): string {
+  return `Your enrollment in ${courseTitle} is confirmed. Start with the first lesson whenever you're ready.`;
+}
+
+export interface CourseIntroEmailContent {
+  learnerName?: string | null;
+  courseTitle: string;
+  courseId: string;
+  welcomeMessage?: string | null;
+}
+
+export function renderCourseIntroEmail({ learnerName, courseTitle, courseId, welcomeMessage }: CourseIntroEmailContent): { subject: string; html: string; text: string } {
+  const appUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+  const courseUrl = `${appUrl}/course/${courseId}`;
+  const message = welcomeMessage?.trim() || defaultCourseIntroMessage(courseTitle);
+  const subject = `Welcome to ${courseTitle}`;
+  const greeting = `You're enrolled, ${firstName(learnerName)}!`;
+  const text = `${greeting}\n\n${message}\n\nStart learning: ${courseUrl}`;
+
+  const html = emailLayout(
+    `<h1 style="margin:0 0 16px;font-size:22px;">${escapeHtml(greeting)}</h1>
+     <div style="font-size:15px;line-height:1.7;color:#e2e8f0;">${textToHtmlParagraphs(message)}</div>
+     <p style="margin:24px 0 0;"><a href="${courseUrl}" style="display:inline-block;padding:12px 24px;border-radius:999px;background:linear-gradient(135deg,#a78bfa,#22d3ee);color:white;text-decoration:none;font-weight:600;">Start learning</a></p>`,
+    { preheader: `Welcome to ${courseTitle}` },
+  );
+
+  return { subject, html, text };
+}
+
+export interface SendCourseIntroOpts {
+  learnerId: string;
+  courseId: string;
+  enrollmentId?: string | null;
+}
+
+export interface SendCourseIntroResult {
+  notificationCreated: boolean;
+  emailSent: boolean;
+  skipped: boolean;
+  reason?: string;
+}
+
+/**
+ * Create the enrollment notification and send the course intro email exactly
+ * once per learner/course. A partial unique index on enrollment notifications
+ * makes this safe when the direct enrollment path and async queue both run.
+ */
+export async function sendCourseIntroEmail(db: SupabaseClient, opts: SendCourseIntroOpts): Promise<SendCourseIntroResult> {
+  const { data: course } = await db.from("courses")
+    .select("title, welcome_message")
+    .eq("id", opts.courseId)
+    .maybeSingle();
+  if (!course) return { notificationCreated: false, emailSent: false, skipped: true, reason: "course_not_found" };
+
+  const href = `/course/${opts.courseId}/learn/start`;
+  const { data: notif, error: notifError } = await db.from("notifications")
+    .insert({
+      user_id: opts.learnerId,
+      type: "enrollment",
+      title: "Enrollment confirmed",
+      body: `Welcome to ${course.title}!`,
+      href,
+      payload: { courseId: opts.courseId, enrollmentId: opts.enrollmentId || null, introEmail: true },
+    })
+    .select("id")
+    .single();
+
+  if (notifError) {
+    if ((notifError as { code?: string }).code === "23505") {
+      return { notificationCreated: false, emailSent: false, skipped: true, reason: "already_sent" };
+    }
+    throw notifError;
+  }
+
+  try {
+    await sendRealtimeNotification(opts.learnerId, { type: "enrollment" });
+  } catch {
+    // Email delivery should not be coupled to realtime bell wake-ups.
+  }
+
+  const [{ data: profile }, { data: user }] = await Promise.all([
+    db.from("profiles").select("display_name").eq("user_id", opts.learnerId).maybeSingle(),
+    db.from("users").select("email").eq("id", opts.learnerId).maybeSingle(),
+  ]);
+  const learnerEmail = (user as { email?: string } | null)?.email;
+  if (!learnerEmail) {
+    return { notificationCreated: true, emailSent: false, skipped: false, reason: "missing_email" };
+  }
+
+  const content = renderCourseIntroEmail({
+    learnerName: (profile as { display_name?: string | null } | null)?.display_name,
+    courseTitle: course.title,
+    courseId: opts.courseId,
+    welcomeMessage: (course as { welcome_message?: string | null }).welcome_message,
+  });
+  const emailResult = await sendEmail({
+    to: learnerEmail,
+    subject: content.subject,
+    html: content.html,
+    text: content.text,
+  });
+
+  return {
+    notificationCreated: true,
+    emailSent: emailResult.ok,
+    skipped: false,
+    reason: emailResult.ok ? undefined : emailResult.reason,
+  };
 }
 
 /**

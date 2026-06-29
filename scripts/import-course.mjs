@@ -658,6 +658,7 @@ async function buildPlan(folder, titleOverride) {
     promo_video_url: courseMeta?.promo_video_url,
     price: Number.isInteger(courseMeta?.price) ? courseMeta.price : 0,
     discounted_price: Number.isInteger(courseMeta?.discounted_price) ? courseMeta.discounted_price : undefined,
+    welcome_message: typeof courseMeta?.welcome_message === "string" ? courseMeta.welcome_message : courseMeta?.welcomeMessage,
     certificate_enabled: courseMeta?.certificate_enabled ?? true,
     certificate_min_progress: Number.isInteger(courseMeta?.certificate_min_progress) ? courseMeta.certificate_min_progress : 100,
     certificate_require_quiz_pass: courseMeta?.certificate_require_quiz_pass ?? false,
